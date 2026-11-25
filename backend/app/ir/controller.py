@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Dict, Optional
@@ -51,10 +52,19 @@ class IRManager:
                 and "disconnected" not in out.lower()
                 and bool(out)
             )
+            summary = out
+            if connected:
+                fw_m = re.search(r"FW Version:\s*([^\r\n]+)", out)
+                sku_m = re.search(r"SKU:\s*([^\r\n]+)", out)
+                parts = [m.group(1).strip() for m in (sku_m, fw_m) if m]
+                if parts:
+                    summary = ", ".join(parts)
+                else:
+                    summary = out.splitlines()[0].strip()[:80]
             return {
                 "installed": True,
                 "connected": connected,
-                "raw": out,
+                "raw": summary,
                 "learning": self._learning_action,
             }
         except FileNotFoundError:
