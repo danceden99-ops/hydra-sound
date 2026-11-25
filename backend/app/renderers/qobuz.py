@@ -27,27 +27,31 @@ class QobuzRenderer(RendererAdapter):
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         qc = cfg.renderers.qobuz
         target_device = alsa_device
+        is_loopback = "loopback" in alsa_device.lower()
         if (
             "hdmi" in cfg.audio.device_name.lower()
             and alsa_device.startswith("hw:")
-            and not alsa_device.startswith("hw:Loopback")
+            and not is_loopback
         ):
             card_dev = alsa_device.split(":", 1)[1].split(",")
             if len(card_dev) == 2:
                 target_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
 
+        alsa_plugin = "plughw" if is_loopback else "hw"
+
         # Apply device name & ALSA settings via pibuz settings CLI before running daemon
-        try:
-            subprocess.run(
-                ["pibuz", "settings", "set", "qconnect.device_name", qc.device_name],
-                capture_output=True,
-                timeout=3,
-            )
-            subprocess.run(
-                ["pibuz", "settings", "set", "audio.device", target_device],
-                capture_output=True,
-                timeout=3,
-            )
-        except Exception:
-            pass
+        for key, value in (
+            ("qconnect.device_name", qc.device_name),
+            ("audio.backend", "alsa"),
+            ("audio.alsa_plugin", alsa_plugin),
+            ("audio.device", target_device),
+        ):
+            try:
+                subprocess.run(
+                    ["pibuz", "settings", "set", key, value],
+                    capture_output=True,
+                    timeout=3,
+                )
+            except Exception:
+                pass
         return ["pibuz", "run"]

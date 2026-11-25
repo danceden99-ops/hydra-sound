@@ -15,7 +15,7 @@ from app.config import AudioOutputConfig, VolumeConfig
 
 logger = logging.getLogger(__name__)
 
-LOOPBACK_PLAYBACK_DEVICE = "hw:Loopback,0,0"
+LOOPBACK_PLAYBACK_DEVICE = "plughw:CARD=Loopback,DEV=0"
 
 
 class AudioPipelineManager:
