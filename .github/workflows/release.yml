@@ -25,7 +25,7 @@ jobs:
 
       - name: Build librespot (Spotify Connect)
         run: |
-          cargo install librespot --locked --no-default-features --features "alsa-backend,rustls-tls-native-roots" --root ./dist
+          cargo install librespot --locked --no-default-features --features "alsa-backend,rustls-tls-native-roots,with-libmdns" --root ./dist
 
       - name: Build pibuz (Qobuz Connect)
         run: |

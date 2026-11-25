@@ -26,5 +26,7 @@ class DLNARenderer(RendererAdapter):
             "--friendly-name",
             dc.device_name,
             "--gstout-audiosink",
-            f"alsasink device={alsa_device}",
+            "alsasink",
+            "--gstout-audiodevice",
+            alsa_device,
         ]
