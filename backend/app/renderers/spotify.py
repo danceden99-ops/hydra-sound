@@ -37,6 +37,9 @@ class SpotifyRenderer(RendererAdapter):
             "--onevent",
             "/opt/hydrasound/scripts/hooks/librespot_event.sh",
         ]
+        # Raspberry Pi vc4-hdmi rejects S16_LE on raw hw:X,Y; use S32 for HDMI
+        if "hdmi" in cfg.audio.device_name.lower() and not alsa_device.startswith("hw:Loopback"):
+            cmd.extend(["--format", "S32"])
         if cfg.volume.mode == "disabled":
             cmd.extend(["--volume-ctrl", "fixed", "--initial-volume", "100"])
         else:
