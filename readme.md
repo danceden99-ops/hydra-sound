@@ -80,6 +80,12 @@ For full technical details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
+## Security & Credentials
+
+> **Recommended:** Use **Zeroconf / LAN Discovery** (enabled by default) for **Spotify Connect** and **Qobuz Connect** instead of entering your username and password in the Web GUI. With Zeroconf, your phone or desktop app authenticates directly with the service and streams to Hydra Sound over your local network—so your account credentials are **never stored** on the Raspberry Pi.
+
+---
+
 ## Development & Testing
 
 Run the unit test suite locally (Python 3.11+):
