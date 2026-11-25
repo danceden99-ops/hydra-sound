@@ -92,6 +92,7 @@ class GoogleCastConfig(BaseModel):
 
 class RenderersConfig(BaseModel):
     device_name: str = "Hydra Sound"
+    lock_mode: Literal["preempt_paused", "strict", "last_wins"] = "preempt_paused"
     pause_timeout_seconds: int = Field(default=60, ge=5, le=3600)
     spotify: SpotifyConfig = Field(default_factory=SpotifyConfig)
     qobuz: QobuzConfig = Field(default_factory=QobuzConfig)

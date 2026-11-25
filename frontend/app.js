@@ -141,6 +141,7 @@ async function loadInitialConfig() {
   $("vol-hw-mixer").value = cfg.volume.hardware_mixer_name;
 
   $("renderer-device-name").value = cfg.renderers.device_name || "Hydra Sound";
+  $("lock-mode").value = cfg.renderers.lock_mode || "preempt_paused";
   $("pause-timeout").value = cfg.renderers.pause_timeout_seconds;
   $("sp-enabled").checked = cfg.renderers.spotify.enabled;
   $("sp-auth").value = cfg.renderers.spotify.auth_mode;
@@ -244,6 +245,7 @@ $("save-services").addEventListener("click", async () => {
   const devName = $("renderer-device-name").value.trim() || "Hydra Sound";
   await api("/api/config/renderers", "PUT", {
     device_name: devName,
+    lock_mode: $("lock-mode").value,
     pause_timeout_seconds: Number($("pause-timeout").value),
     spotify: {
       enabled: $("sp-enabled").checked,

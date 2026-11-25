@@ -73,29 +73,44 @@ def test_volume_curves_and_limits() -> None:
 async def test_stream_orchestrator_lock_and_pause_timeout() -> None:
     cfg = HydraConfig()
     cfg.renderers.pause_timeout_seconds = 1
+    cfg.renderers.lock_mode = "strict"
     pipeline = AudioPipelineManager(CamillaDSPManager())
     orch = StreamOrchestrator(pipeline)
 
-    # First-come-first-serve: Spotify acquires lock
+    # Strict mode: Spotify acquires lock and blocks Qobuz even when paused
     res1 = await orch.handle_renderer_event("spotify", "play", cfg, title="Track A")
     assert res1["accepted"] is True
     assert orch.stream.active_source == "spotify"
 
-    # Qobuz is rejected while Spotify is playing
     res2 = await orch.handle_renderer_event("qobuz", "play", cfg, title="Track B")
     assert res2["accepted"] is False
     assert res2["reason"] == "locked"
 
-    # Pause starts timeout; after >1s lock releases
     await orch.handle_renderer_event("spotify", "pause", cfg)
     assert orch.stream.state == "paused"
+    res2_paused = await orch.handle_renderer_event("qobuz", "play", cfg, title="Track B")
+    assert res2_paused["accepted"] is False
+
+    # After pause timeout, lock soft-releases
     await asyncio.sleep(1.3)
     assert orch.stream.active_source is None
     assert orch.stream.state == "idle"
 
-    # Now Qobuz can acquire lock, and Stop releases immediately
+    # Preempt-when-paused (default): blocks while playing, switches immediately when paused
+    cfg.renderers.lock_mode = "preempt_paused"
     res3 = await orch.handle_renderer_event("qobuz", "play", cfg, title="Track B")
     assert res3["accepted"] is True
+    assert (await orch.handle_renderer_event("spotify", "play", cfg))["accepted"] is False
+    await orch.handle_renderer_event("qobuz", "pause", cfg)
+    res4 = await orch.handle_renderer_event("spotify", "play", cfg, title="Track C")
+    assert res4["accepted"] is True
+    assert orch.stream.active_source == "spotify"
+
+    # Last-wins: switches immediately even while playing
+    cfg.renderers.lock_mode = "last_wins"
+    res5 = await orch.handle_renderer_event("qobuz", "play", cfg, title="Track D")
+    assert res5["accepted"] is True
+    assert orch.stream.active_source == "qobuz"
     await orch.handle_renderer_event("qobuz", "stop", cfg)
     assert orch.stream.active_source is None
 

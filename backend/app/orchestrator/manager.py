@@ -90,23 +90,45 @@ class StreamOrchestrator:
         if source not in self.renderers:
             return {"accepted": False, "reason": "unknown_source"}
 
-        # First-come-first-serve lock check
+        # Stream lock / preemption check
         if (
             self.stream.active_source is not None
             and self.stream.active_source != source
             and self.stream.state in ("playing", "paused")
         ):
-            logger.info(
-                "Rejected stream request from %s; locked by %s (%s)",
-                source,
-                self.stream.active_source,
-                self.stream.state,
+            if event not in ("play", "playing", "start", "metadata"):
+                return {"accepted": False, "reason": "not_active_source"}
+
+            lock_mode = getattr(cfg.renderers, "lock_mode", "preempt_paused")
+            can_preempt = (
+                lock_mode == "last_wins"
+                or (lock_mode == "preempt_paused" and self.stream.state == "paused")
             )
-            return {
-                "accepted": False,
-                "reason": "locked",
-                "active_source": self.stream.active_source,
-            }
+            if not can_preempt:
+                logger.info(
+                    "Rejected stream request from %s; locked by %s (%s)",
+                    source,
+                    self.stream.active_source,
+                    self.stream.state,
+                )
+                return {
+                    "accepted": False,
+                    "reason": "locked",
+                    "active_source": self.stream.active_source,
+                }
+
+            prev = self.stream.active_source
+            logger.info(
+                "Preempting %s (%s) in favor of %s (mode=%s)",
+                prev,
+                self.stream.state,
+                source,
+                lock_mode,
+            )
+            self._cancel_pause_timer()
+            self._release_lock()
+            if prev in self.renderers and self.renderers[prev].is_enabled(cfg):
+                self.renderers[prev].start(cfg, self._current_alsa_device)
 
         if event in ("play", "playing", "start", "metadata"):
             self._cancel_pause_timer()
@@ -166,14 +188,11 @@ class StreamOrchestrator:
                 await asyncio.sleep(1)
                 remaining -= 1
             logger.info(
-                "Pause timeout (%ss) expired for %s; releasing stream lock.",
+                "Pause timeout (%ss) expired for %s; soft-releasing stream lock.",
                 timeout_seconds,
                 self.stream.active_source,
             )
-            prev = self.stream.active_source
             self._release_lock()
-            if prev and prev in self.renderers and self.renderers[prev].is_enabled(cfg):
-                self.renderers[prev].start(cfg, self._current_alsa_device)
 
         try:
             loop = asyncio.get_running_loop()

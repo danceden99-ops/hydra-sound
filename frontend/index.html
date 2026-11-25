@@ -172,6 +172,14 @@
           <input type="text" id="renderer-device-name" placeholder="Hydra Sound" />
         </label>
         <label>
+          Stream Lock Policy
+          <select id="lock-mode">
+            <option value="preempt_paused">Preempt When Paused (Recommended)</option>
+            <option value="last_wins">Last-Wins (Auto-Switch)</option>
+            <option value="strict">Strict (First-Come-First-Serve)</option>
+          </select>
+        </label>
+        <label>
           Pause Lock Timeout (seconds before releasing stream)
           <input type="number" id="pause-timeout" min="5" max="3600" />
         </label>
