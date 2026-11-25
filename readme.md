@@ -59,7 +59,7 @@ Because Hydra Sound relies on open-source protocol implementations, please note 
 1. Flash **Raspberry Pi OS Lite (64-bit)** (Debian Bookworm or newer) and boot your Pi.
 2. Clone the repository and run the installer:
    ```bash
-   git clone https://github.com/<your-username>/hydra-sound.git
+   git clone https://github.com/danceden99-ops/hydra-sound.git
    cd hydra-sound
    sudo bash scripts/install.sh
    ```
