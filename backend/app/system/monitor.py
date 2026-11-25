@@ -219,6 +219,7 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
 
     repo_root = Path(__file__).resolve().parents[3]
     remote_url = f"https://github.com/{repo.strip()}.git"
+    logger.info("Installing release %s from %s", clean_tag, repo.strip())
     try:
         fetch = subprocess.run(
             ["git", "-C", str(repo_root), "fetch", "--tags", remote_url, clean_tag if clean_tag == "main" else f"refs/tags/{clean_tag}:refs/tags/{clean_tag}"],
@@ -227,13 +228,15 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
             timeout=60,
         )
         if fetch.returncode != 0:
-            return {"ok": False, "error": fetch.stderr.strip() or "git fetch failed"}
+            err = fetch.stderr.strip() or "git fetch failed"
+            logger.error("Release install fetch failed: %s", err)
+            return {"ok": False, "error": err}
 
         target_ref = "FETCH_HEAD" if clean_tag == "main" else f"tags/{clean_tag}"
         checkout_cmd = (
-            ["git", "-C", str(repo_root), "checkout", "-B", "main", "FETCH_HEAD"]
+            ["git", "-C", str(repo_root), "checkout", "-f", "-B", "main", "FETCH_HEAD"]
             if clean_tag == "main"
-            else ["git", "-C", str(repo_root), "checkout", target_ref]
+            else ["git", "-C", str(repo_root), "checkout", "-f", target_ref]
         )
         checkout = subprocess.run(
             checkout_cmd,
@@ -242,7 +245,9 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
             timeout=30,
         )
         if checkout.returncode != 0:
-            return {"ok": False, "error": checkout.stderr.strip() or "git checkout failed"}
+            err = checkout.stderr.strip() or "git checkout failed"
+            logger.error("Release install checkout failed: %s", err)
+            return {"ok": False, "error": err}
 
         pip_bin = Path("/opt/hydrasound/venv/bin/pip")
         req_file = repo_root / "backend" / "requirements.txt"
