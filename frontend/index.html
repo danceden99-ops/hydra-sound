@@ -59,6 +59,12 @@
         <input id="vol-slider" type="range" min="0" max="100" value="35" />
         <strong id="vol-value">35%</strong>
       </div>
+      <div id="usb-safety-banner" class="hint" hidden style="margin-top: 10px; padding: 10px; border-radius: 6px; border: 1px solid #ef4444; background: rgba(239, 68, 68, 0.12); color: #fecaca;">
+        <strong>Speaker Protection Active (Muted):</strong> USB DAC detected with <strong>Volume Mode = Disabled</strong> (0 dB full-scale pass-through). Verify your downstream amp/DAC volume is turned down before unmuting.
+        <div class="row-actions" style="margin-top: 8px;">
+          <button id="btn-confirm-usb-disabled" class="btn btn-sm btn-danger">I Confirm — Unmute 0 dB Pass-Through</button>
+        </div>
+      </div>
     </section>
 
     <!-- Tabs -->

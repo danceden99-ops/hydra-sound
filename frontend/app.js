@@ -56,7 +56,9 @@ function updateLiveUI(data) {
   $("incoming-format").textContent = formatStream(stream.incoming_rate, stream.incoming_bit_depth, stream.incoming_format);
   $("outgoing-format").textContent = formatStream(stream.outgoing_rate, stream.outgoing_bit_depth, stream.outgoing_format);
 
-  $("vol-mode-badge").textContent = volume.mode.toUpperCase();
+  $("vol-mode-badge").textContent = data.usb_safety_muted ? "MUTED (USB SAFETY)" : volume.mode.toUpperCase();
+  const usbBanner = $("usb-safety-banner");
+  if (usbBanner) usbBanner.hidden = !data.usb_safety_muted;
   const disabled = volume.mode === "disabled";
   $("vol-slider").disabled = disabled;
   $("btn-mute").disabled = disabled;
@@ -124,6 +126,7 @@ async function loadInitialConfig() {
     const opt = document.createElement("option");
     opt.value = d.id;
     opt.textContent = d.description;
+    opt.dataset.deviceType = d.device_type || "";
     devSel.appendChild(opt);
   });
   devSel.value = cfg.audio.device_id;
@@ -200,9 +203,26 @@ $("vol-slider").addEventListener("change", async (e) => {
 $("btn-mute").addEventListener("click", () => api("/api/volume/mute", "POST"));
 $("btn-release-lock").addEventListener("click", () => api("/api/stream/release", "POST"));
 
+function isSelectedDeviceUsb() {
+  const devSel = $("audio-device");
+  const opt = devSel.options[devSel.selectedIndex];
+  const dtype = opt?.dataset?.deviceType || "";
+  const label = opt?.textContent || "";
+  return dtype === "usb" || label.toLowerCase().includes("usb");
+}
+
+function promptUsbDisabledConfirm() {
+  return confirm(
+    "SPEAKER PROTECTION WARNING\n\n" +
+    "You are routing to a USB DAC with Volume Mode = Disabled (0 dB / 100% full-scale pass-through with NO max-volume limiter).\n\n" +
+    "Until confirmed, output will stay MUTED.\n\n" +
+    "Are you sure this is intentional and your downstream amp/DAC volume is safe?"
+  );
+}
+
 $("save-audio").addEventListener("click", async () => {
   const devSel = $("audio-device");
-  await api("/api/config/audio", "PUT", {
+  const res = await api("/api/config/audio", "PUT", {
     device_id: devSel.value,
     device_name: devSel.options[devSel.selectedIndex]?.textContent || "DAC",
     bit_perfect: !$("resample-enabled").checked,
@@ -211,6 +231,15 @@ $("save-audio").addEventListener("click", async () => {
     resample_bit_depth: Number($("resample-bits").value),
     resample_algorithm: $("resample-algo").value,
   });
+  if (res.usb_safety_muted) {
+    if (promptUsbDisabledConfirm()) {
+      await api("/api/volume/confirm-usb-disabled", "POST");
+      showToast("Audio settings applied (USB 0 dB pass-through confirmed)");
+      return;
+    }
+    showToast("Output muted until USB 0 dB pass-through is confirmed");
+    return;
+  }
   showToast("Audio settings applied");
 });
 
@@ -228,8 +257,13 @@ $("btn-audio-caps").addEventListener("click", async () => {
 });
 
 $("save-volume").addEventListener("click", async () => {
-  await api("/api/config/volume", "PUT", {
-    mode: $("vol-mode").value,
+  const mode = $("vol-mode").value;
+  let confirmed = false;
+  if (mode === "disabled" && isSelectedDeviceUsb()) {
+    confirmed = promptUsbDisabledConfirm();
+  }
+  const res = await api("/api/config/volume", "PUT", {
+    mode,
     curve: $("vol-curve").value,
     power_on_volume: Number($("vol-power-on").value),
     max_volume: Number($("vol-max").value),
@@ -237,8 +271,19 @@ $("save-volume").addEventListener("click", async () => {
     current_volume: Number($("vol-slider").value),
     muted: false,
     hardware_mixer_name: $("vol-hw-mixer").value || "PCM",
+    usb_disabled_confirmed: confirmed,
   });
-  showToast("Volume settings saved");
+  if (res.usb_safety_muted) {
+    showToast("Output muted until USB 0 dB pass-through is confirmed");
+  } else {
+    showToast("Volume settings saved");
+  }
+});
+
+$("btn-confirm-usb-disabled").addEventListener("click", async () => {
+  if (!promptUsbDisabledConfirm()) return;
+  await api("/api/volume/confirm-usb-disabled", "POST");
+  showToast("USB 0 dB pass-through confirmed and unmuted");
 });
 
 $("save-services").addEventListener("click", async () => {

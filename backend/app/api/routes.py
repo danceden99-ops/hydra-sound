@@ -76,6 +76,7 @@ async def get_status(request: Request) -> dict:
         "system": get_system_metrics(),
         "network": state.network_manager.get_status(cfg.network),
         "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume),
+        "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
         "renderers": state.orchestrator.get_renderers_status(cfg),
     }
 
@@ -108,11 +109,18 @@ async def get_audio_capabilities(device_id: str) -> dict:
 async def update_audio_config(payload: AudioOutputConfig, request: Request) -> dict:
     state = request.app.state
     cfg: HydraConfig = state.config_store.get()
+    device_changed = cfg.audio.device_id != payload.device_id
     cfg.audio = payload
+    if device_changed:
+        cfg.volume.usb_disabled_confirmed = False
     state.config_store.save(cfg)
     state.orchestrator.start_enabled_renderers(cfg)
     await state.volume_controller.apply(cfg.audio, cfg.volume)
-    return {"ok": True, "audio": cfg.audio.model_dump()}
+    return {
+        "ok": True,
+        "audio": cfg.audio.model_dump(),
+        "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
+    }
 
 
 @router.put("/config/volume")
@@ -120,6 +128,8 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
     state = request.app.state
     cfg: HydraConfig = state.config_store.get()
     mode_changed = cfg.volume.mode != payload.mode
+    if payload.mode != "disabled":
+        payload.usb_disabled_confirmed = False
     cfg.volume = payload
     cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
         cfg.volume.power_on_volume, cfg.volume
@@ -128,10 +138,29 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         cfg.volume.current_volume, cfg.volume
     )
     state.config_store.save(cfg)
-    if mode_changed:
+    if mode_changed or state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume):
         state.orchestrator.start_enabled_renderers(cfg)
     await state.volume_controller.apply(cfg.audio, cfg.volume)
-    return {"ok": True, "volume": cfg.volume.model_dump()}
+    return {
+        "ok": True,
+        "volume": cfg.volume.model_dump(),
+        "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
+    }
+
+
+@router.post("/volume/confirm-usb-disabled")
+async def confirm_usb_disabled(request: Request) -> dict:
+    state = request.app.state
+    cfg: HydraConfig = state.config_store.get()
+    cfg.volume.usb_disabled_confirmed = True
+    state.config_store.save(cfg)
+    state.orchestrator.start_enabled_renderers(cfg)
+    await state.volume_controller.apply(cfg.audio, cfg.volume)
+    return {
+        "ok": True,
+        "volume": cfg.volume.model_dump(),
+        "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
+    }
 
 
 @router.post("/volume/set")

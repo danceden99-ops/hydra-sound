@@ -108,6 +108,7 @@ async def ws_status(websocket: WebSocket) -> None:
                     "audio": cfg.audio.model_dump(),
                     "system": get_system_metrics(),
                     "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume),
+                    "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
                     "renderers": state.orchestrator.get_renderers_status(cfg),
                 }
             )

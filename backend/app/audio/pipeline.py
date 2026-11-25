@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from app.audio.alsa import is_usb_audio_device
 from app.audio.camilladsp import CamillaDSPManager
 from app.config import AudioOutputConfig, VolumeConfig
 
@@ -25,8 +26,22 @@ class AudioPipelineManager:
         self.camilla = camilla
 
     @staticmethod
+    def requires_usb_safety_mute(
+        audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig
+    ) -> bool:
+        return bool(
+            volume_cfg.mode == "disabled"
+            and not volume_cfg.usb_disabled_confirmed
+            and is_usb_audio_device(audio_cfg.device_id, audio_cfg.device_name)
+        )
+
+    @staticmethod
     def requires_dsp(audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig) -> bool:
-        return bool(audio_cfg.resample_enabled or volume_cfg.mode == "software")
+        return bool(
+            audio_cfg.resample_enabled
+            or volume_cfg.mode == "software"
+            or AudioPipelineManager.requires_usb_safety_mute(audio_cfg, volume_cfg)
+        )
 
     def get_renderer_alsa_device(
         self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig

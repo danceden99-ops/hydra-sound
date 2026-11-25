@@ -8,6 +8,7 @@ import math
 import subprocess
 from typing import Callable, Optional
 
+from app.audio.alsa import is_usb_audio_device
 from app.audio.camilladsp import CamillaDSPManager
 from app.config import AudioOutputConfig, VolumeConfig
 
@@ -111,6 +112,13 @@ class VolumeController:
         notify_client: bool = True,
     ) -> None:
         if vol_cfg.mode == "disabled":
+            if not vol_cfg.usb_disabled_confirmed and is_usb_audio_device(
+                audio_cfg.device_id, audio_cfg.device_name
+            ):
+                logger.warning(
+                    "USB DAC speaker protection active: muting output until Volume=Disabled is confirmed."
+                )
+                await self.camilla.set_volume_db(-80.0, muted=True)
             return
 
         vol_cfg.current_volume = self.clamp_volume(vol_cfg.current_volume, vol_cfg)

@@ -100,7 +100,9 @@ def build_camilladsp_config(
     filters = {}
     pipeline = []
 
-    if volume_cfg.mode == "software":
+    if volume_cfg.mode == "software" or (
+        volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed
+    ):
         filters["master_volume"] = {
             "type": "Volume",
             "parameters": {

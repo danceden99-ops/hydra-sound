@@ -134,6 +134,14 @@ def list_audio_devices() -> List[AudioDevice]:
     return devices or _fallback_devices()
 
 
+def is_usb_audio_device(device_id: str, device_name: str = "") -> bool:
+    """Return True if the selected ALSA output is a USB audio device."""
+    for dev in list_audio_devices():
+        if dev.id == device_id:
+            return dev.device_type == "usb"
+    return "usb" in device_name.lower()
+
+
 def _fallback_devices() -> List[AudioDevice]:
     """Fallback list when running outside a Linux ALSA host (e.g. dev/test)."""
     return [

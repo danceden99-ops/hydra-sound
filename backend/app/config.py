@@ -34,6 +34,7 @@ class VolumeConfig(BaseModel):
     current_volume: int = Field(default=35, ge=0, le=100)
     muted: bool = False
     hardware_mixer_name: str = "PCM"
+    usb_disabled_confirmed: bool = False
 
 
 class IRConfig(BaseModel):
