@@ -378,13 +378,15 @@ async def get_module_updates(request: Request) -> list[dict]:
 
 @router.post("/modules/{module_id}/update")
 async def trigger_module_update(module_id: str, request: Request) -> dict:
+    import asyncio
+
     state = request.app.state
     renderers = state.orchestrator.renderers
     if module_id not in renderers:
         raise HTTPException(status_code=404, detail="Unknown module")
     adapter = renderers[module_id]
     adapter.stop()
-    res = run_module_update(adapter)
+    res = await asyncio.to_thread(run_module_update, adapter)
     cfg: HydraConfig = state.config_store.get()
     if adapter.is_enabled(cfg):
         adapter.start(cfg, state.orchestrator._current_alsa_device)

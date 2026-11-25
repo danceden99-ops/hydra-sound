@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
+from typing import Optional
 
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
@@ -34,6 +36,19 @@ class AirPlayRenderer(RendererAdapter):
 
     def is_enabled(self, cfg: HydraConfig) -> bool:
         return cfg.renderers.airplay.enabled
+
+    def get_installed_version(self) -> Optional[str]:
+        try:
+            res = subprocess.run(
+                [self.meta.binary_name, "-V"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            out = (res.stdout or res.stderr).strip()
+            return out.splitlines()[0] if out else None
+        except Exception:
+            return None
 
     def write_config(self, cfg: HydraConfig, alsa_device: str) -> Path:
         conf_path = _get_shairport_conf_path()

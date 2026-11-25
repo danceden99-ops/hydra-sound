@@ -64,6 +64,38 @@ async def check_github_latest_release(repo: str) -> Optional[str]:
     return None
 
 
+def _check_apt_package_versions(pkg: str) -> tuple[Optional[str], Optional[str]]:
+    """Return (installed, candidate) versions from `apt-cache policy <pkg>`."""
+    try:
+        res = subprocess.run(
+            ["apt-cache", "policy", pkg],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode != 0:
+            return None, None
+        installed: Optional[str] = None
+        candidate: Optional[str] = None
+        for line in res.stdout.splitlines():
+            s = line.strip()
+            if s.startswith("Installed:"):
+                val = s.split(":", 1)[1].strip()
+                installed = None if val == "(none)" else val
+            elif s.startswith("Candidate:"):
+                val = s.split(":", 1)[1].strip()
+                candidate = None if val == "(none)" else val
+        return installed, candidate
+    except Exception:
+        return None, None
+
+
+_APT_MANAGED_PACKAGES = {
+    "airplay": "shairport-sync",
+    "dlna": "gmediarender",
+}
+
+
 async def check_all_module_updates(
     renderers: Dict[str, RendererAdapter],
 ) -> List[Dict[str, object]]:
@@ -71,17 +103,26 @@ async def check_all_module_updates(
     results: List[Dict[str, object]] = []
     for rid, adapter in renderers.items():
         installed = adapter.get_installed_version()
-        latest = await check_github_latest_release(adapter.meta.github_repo)
-        update_available = bool(
-            latest and (not installed or latest.lstrip("v") not in installed)
-        )
+        apt_pkg = _APT_MANAGED_PACKAGES.get(rid)
+        if apt_pkg:
+            apt_inst, apt_cand = _check_apt_package_versions(apt_pkg)
+            if apt_inst and not installed:
+                installed = apt_inst
+            latest = f"APT {apt_cand}" if apt_cand else "APT latest"
+            update_available = bool(apt_cand and (not apt_inst or apt_cand != apt_inst))
+        else:
+            latest = await check_github_latest_release(adapter.meta.github_repo) or "Unknown"
+            update_available = bool(
+                latest != "Unknown"
+                and (not installed or latest.lstrip("v") not in installed)
+            )
         results.append(
             {
                 "id": rid,
                 "display_name": adapter.meta.display_name,
                 "github_repo": adapter.meta.github_repo,
                 "installed_version": installed or "Not installed",
-                "latest_version": latest or "Unknown",
+                "latest_version": latest,
                 "update_available": update_available,
                 "update_script": adapter.meta.update_script,
                 "quality_note": adapter.meta.quality_note,
