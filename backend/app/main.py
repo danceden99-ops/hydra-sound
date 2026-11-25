@@ -65,8 +65,26 @@ async def lifespan(app: FastAPI):
     await volume_controller.apply_power_on(cfg.audio, cfg.volume)
     config_store.save(cfg)
 
+    async def _handle_ir_action(action: str) -> None:
+        cur_cfg = config_store.get()
+        if cur_cfg.volume.mode == "disabled":
+            logger.info("Ignoring IR %s because Volume Mode is Disabled.", action)
+            return
+        if action == "vol_up":
+            await volume_controller.step_volume(1, cur_cfg.audio, cur_cfg.volume)
+        elif action == "vol_down":
+            await volume_controller.step_volume(-1, cur_cfg.audio, cur_cfg.volume)
+        elif action == "mute":
+            await volume_controller.toggle_mute(cur_cfg.audio, cur_cfg.volume)
+        config_store.save(cur_cfg)
+
+    ir_manager.start_listener(
+        asyncio.get_running_loop(), config_store.get, _handle_ir_action
+    )
+
     yield
 
+    ir_manager.stop_listener()
     orchestrator.stop_all()
     root_logger.removeHandler(log_handler)
 

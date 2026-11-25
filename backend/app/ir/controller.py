@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
+import select
+import struct
 import subprocess
+import threading
+import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Awaitable, Callable, Dict, List, Optional
 
 from app.config import IRConfig
 
@@ -23,12 +29,142 @@ FLIRC_ACTION_TO_KEY = {
     "mute": "mute",
 }
 
+_EV_KEY = 0x01
+_KEY_MUTE = 113
+_KEY_VOLUMEDOWN = 114
+_KEY_VOLUMEUP = 115
+_INPUT_EVENT_FMT = "llHHi"
+_INPUT_EVENT_SIZE = struct.calcsize(_INPUT_EVENT_FMT)
+
+
+def _find_ir_event_devices(mode: str) -> List[Path]:
+    """Find `/dev/input/event*` nodes matching FLIRC or GPIO IR."""
+    devices: List[Path] = []
+    sys_input = Path("/sys/class/input")
+    if not sys_input.exists():
+        return devices
+    for entry in sorted(sys_input.glob("event*")):
+        name_file = entry / "device" / "name"
+        dev_node = Path("/dev/input") / entry.name
+        if not dev_node.exists():
+            continue
+        try:
+            name = name_file.read_text(encoding="utf-8", errors="ignore").strip().lower()
+        except Exception:
+            continue
+        if mode == "flirc" and "flirc" in name:
+            devices.append(dev_node)
+        elif mode == "gpio" and ("gpio" in name or "ir" in name):
+            devices.append(dev_node)
+    return devices
+
 
 class IRManager:
-    """Manages FLIRC USB learning via `flirc_util` and GPIO IR dtoverlay."""
+    """Manages FLIRC USB learning via `flirc_util`, GPIO IR dtoverlay, and key event listening."""
 
     def __init__(self) -> None:
         self._learning_action: Optional[str] = None
+        self._stop_event = threading.Event()
+        self._listener_thread: Optional[threading.Thread] = None
+
+    def start_listener(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        get_cfg: Callable[[], object],
+        on_action: Callable[[str], Awaitable[None]],
+    ) -> None:
+        if self._listener_thread and self._listener_thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._listener_thread = threading.Thread(
+            target=self._listen_loop,
+            args=(loop, get_cfg, on_action),
+            daemon=True,
+        )
+        self._listener_thread.start()
+
+    def stop_listener(self) -> None:
+        self._stop_event.set()
+
+    def _listen_loop(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        get_cfg: Callable[[], object],
+        on_action: Callable[[str], Awaitable[None]],
+    ) -> None:
+        fds: Dict[int, Path] = {}
+        active_mode: Optional[str] = None
+
+        def _close_all() -> None:
+            for fd in list(fds):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            fds.clear()
+
+        while not self._stop_event.is_set():
+            try:
+                cfg = get_cfg()
+                mode = getattr(getattr(cfg, "ir", None), "mode", "disabled")
+            except Exception:
+                mode = "disabled"
+
+            if mode == "disabled" or self._learning_action is not None:
+                _close_all()
+                active_mode = None
+                time.sleep(0.5)
+                continue
+
+            if mode != active_mode or not fds:
+                _close_all()
+                active_mode = mode
+                for dev_path in _find_ir_event_devices(mode):
+                    try:
+                        fd = os.open(str(dev_path), os.O_RDONLY | os.O_NONBLOCK)
+                        fds[fd] = dev_path
+                        logger.info("Listening for IR key events on %s (%s)", dev_path, mode)
+                    except OSError as exc:
+                        logger.debug("Could not open IR input %s: %s", dev_path, exc)
+                if not fds:
+                    time.sleep(2.0)
+                    continue
+
+            try:
+                readable, _, _ = select.select(list(fds.keys()), [], [], 1.0)
+            except (OSError, ValueError):
+                _close_all()
+                continue
+
+            for fd in readable:
+                try:
+                    data = os.read(fd, _INPUT_EVENT_SIZE * 16)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    _close_all()
+                    break
+
+                offset = 0
+                while offset + _INPUT_EVENT_SIZE <= len(data):
+                    _, _, ev_type, code, value = struct.unpack_from(
+                        _INPUT_EVENT_FMT, data, offset
+                    )
+                    offset += _INPUT_EVENT_SIZE
+                    if ev_type != _EV_KEY:
+                        continue
+                    action: Optional[str] = None
+                    if code == _KEY_VOLUMEUP and value in (1, 2):
+                        action = "vol_up"
+                    elif code == _KEY_VOLUMEDOWN and value in (1, 2):
+                        action = "vol_down"
+                    elif code == _KEY_MUTE and value == 1:
+                        action = "mute"
+                    if action:
+                        logger.info("IR key event received: %s", action)
+                        asyncio.run_coroutine_threadsafe(on_action(action), loop)
+
+        _close_all()
 
     def get_flirc_status(self) -> Dict[str, object]:
         try:
