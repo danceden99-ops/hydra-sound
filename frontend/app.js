@@ -386,8 +386,12 @@ $("btn-check-releases").addEventListener("click", async () => {
   releases.forEach((r, idx) => {
     const opt = document.createElement("option");
     opt.value = r.tag;
-    const latestMark = idx === 0 ? " [Latest]" : "";
-    opt.textContent = `${r.tag}${latestMark} (${r.published_at})`;
+    if (r.tag === "main") {
+      opt.textContent = "main [Latest Dev / Unreleased Commits] (branch)";
+    } else {
+      const latestMark = idx === 0 ? " [Latest Release]" : "";
+      opt.textContent = `${r.tag}${latestMark} (${r.published_at})`;
+    }
     sel.appendChild(opt);
   });
   $("sys-release-msg").textContent = `Found ${releases.length} release(s). Latest: ${releases[0].tag}`;
