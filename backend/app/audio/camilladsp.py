@@ -58,6 +58,16 @@ def build_camilladsp_config(
     )
     target_rate = audio_cfg.resample_rate if audio_cfg.resample_enabled else 44100
 
+    playback_device = audio_cfg.device_id
+    if (
+        "hdmi" in audio_cfg.device_name.lower()
+        and playback_device.startswith("hw:")
+        and not playback_device.startswith("hw:Loopback")
+    ):
+        card_dev = playback_device.split(":", 1)[1].split(",")
+        if len(card_dev) == 2:
+            playback_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
+
     devices: dict = {
         "samplerate": target_rate,
         "chunksize": 2048,
@@ -70,7 +80,7 @@ def build_camilladsp_config(
         "playback": {
             "type": "Alsa",
             "channels": 2,
-            "device": audio_cfg.device_id,
+            "device": playback_device,
             "format": target_format,
         },
     }
