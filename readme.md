@@ -10,33 +10,37 @@ Hydra Sound turns a Raspberry Pi 4 or 5 into a discoverable, high-resolution LAN
 
 ## Features
 
-- **Audio Output Selection:** Selectable via Web GUI between **USB DAC**, **HDMI**, or built-in audio interfaces (note: Raspberry Pi 5 has HDMI and USB/HAT only).
+- **Audio Output Selection & Capabilities:** Selectable via Web GUI between **USB DAC**, **HDMI**, or built-in audio interfaces (note: Raspberry Pi 5 has HDMI and USB/HAT only), with live **Show Device Capabilities** (`hw_params` & ALSA mixer probing).
 - **Dynamic Bypass Audio Pipeline:**
-  - **Bit-Perfect Mode (Default):** When Resampling is off and Volume is set to *Disabled* or *Hardware*, audio streams bypass all mixing and DSP directly to ALSA `hw:X,Y`, matching the source bit depth, sample rate, and channel count bit-for-bit.
-  - **DSP Mode (Optional):** When *Software Volume* or *Resampling* is enabled, streams route through `snd-aloop` → **CamillaDSP** (64-bit floating-point internal processing) with selectable target sample rate (44.1 kHz – 384 kHz), bit depth (16/24/32-bit), and resampling algorithm (`SincVeryHigh`, `SincHigh`, `SincMedium`, `SincFast`).
-- **Supported Streaming Protocols (First-Come-First-Serve):**
-  - **Spotify Connect** (`librespot`) — Zeroconf or username/password auth.
-  - **Qobuz Connect** (`pibuz`) — Native LAN discovery & Hi-Res FLAC up to 24-bit/192 kHz.
+  - **Bit-Perfect Mode (Default):** When Resampling is off and Volume is set to *Disabled* or *Hardware*, audio streams bypass all mixing and DSP directly to ALSA `hw:X,Y` (automatically resolving ALSA card IDs and `plughw`/`hdmi` IEC958 framing for Raspberry Pi `vc4-hdmi` outputs), matching the source bit depth, sample rate, and channel count bit-for-bit.
+  - **DSP Mode (Optional):** When *Software Volume* or *Resampling* is enabled, streams route through `plughw:CARD=Loopback,DEV=0` → `hw:Loopback,1,0` → **CamillaDSP 4.x** (64-bit floating-point internal processing) with selectable target sample rate (44.1 kHz – 384 kHz), bit depth (16/24/32-bit, `S24_3_LE` for 24-bit), `enable_rate_adjust`, and `AsyncSinc` resampling profiles (`SincVeryHigh`/`Accurate`, `SincHigh`/`Balanced`, `SincMedium`/`Fast`, `SincFast`/`VeryFast`).
+- **Supported Streaming Protocols:**
+  - **Spotify Connect** (`librespot`, built from `dev` branch) — Zeroconf or username/password auth.
+  - **Qobuz Connect** (`pibuz`) — Native LAN discovery & Hi-Res FLAC up to 24-bit/192 kHz via direct ALSA backend.
   - **Apple AirPlay 1** (`shairport-sync`) — Lossless 16-bit/44.1 kHz ALAC.
   - **DLNA / UPnP** (`gmrender-resurrect`) — Bit-perfect Hi-Res PCM/FLAC.
   - **Google Cast** (`shanocast`) — *Optional, disabled by default in Web GUI.*
-- **First-Come-First-Serve Stream Orchestrator:**
-  - Locks audio output to the active streaming client.
-  - Releases the lock immediately when the user hits **Stop** (or disconnects), or automatically after a configurable **Pause Timeout** (default: `60s`).
+- **Configurable Stream Lock & Soft Release:**
+  - **Stream Lock Policy** (configurable in the **Renderers** tab):
+    - `Preempt When Paused` *(Default)* — Protects active playback, while allowing another renderer to take over immediately as soon as the current stream is paused.
+    - `Last-Wins (Auto-Switch)` — Pressing Play on any renderer immediately takes over the output.
+    - `Strict (First-Come-First-Serve)` — Holds the lock until Stop/Disconnect or Pause Timeout expires.
+  - **Soft Release:** When the configurable **Pause Timeout** (`5s`–`3600s`, default `60s`) expires, Hydra Sound releases the logical stream lock without restarting the renderer process, keeping Spotify/Qobuz Connect sessions alive on your phone/tablet.
 - **Flexible Volume Control & Client Sync:**
-  - **Disabled:** 0 dB pass-through for downstream preamps/DACs.
-  - **Hardware:** Controls the ALSA hardware mixer (`amixer`) on the DAC/HDMI.
-  - **Software (32-bit+):** High-precision CamillaDSP master gain.
+  - **Disabled:** 0 dB pass-through for downstream preamps/DACs/AVRs.
+  - **Hardware:** Controls the ALSA hardware mixer (`amixer`) on USB DACs/HATs (e.g. XMOS UAC2).
+  - **Software (32-bit+):** Real-time CamillaDSP WebSocket gain (`SetVolume` / `SetMute`).
   - Configurable **Logarithmic** or **Linear** curve, **Power-On Volume**, **Max Volume Limit**, and **Step Size**, with volume feedback pushed back to active client apps.
 - **IR Remote Control:**
-  - **FLIRC USB** with interactive Web GUI IR learning (Volume+, Volume-, Mute, Clear).
-  - **GPIO IR Receiver** with Web GUI-selectable BCM GPIO pin (`dtoverlay=gpio-ir`).
-- **Live Telemetry & Web GUI:**
-  - Real-time WebSocket status for Now Playing metadata, incoming vs. outgoing bit depth/sample rate/format, CPU load, and Raspberry Pi temperature.
-  - Zero-config mDNS access at `http://hydrasound.local:8000` with Web GUI **DHCP / Static IP** configuration.
-- **Modular Upstream Update Notifier:**
-  - Each protocol adapter is isolated in `backend/app/renderers/` and `scripts/modules/`.
-  - The Web GUI checks GitHub Releases for upstream updates and lets you trigger per-module updates.
+  - **FLIRC USB** with `flirc_util` status/learning in the Web GUI (Volume+, Volume-, Mute, Clear) and a built-in `/dev/input/event*` HID key listener (150ms debounce) wired directly to `VolumeController`.
+  - **GPIO IR Receiver** with Web GUI-selectable BCM GPIO pin (`dtoverlay=gpio-ir`) and `/dev/input/event*` listener.
+- **Live Telemetry, Networking & Web GUI:**
+  - Real-time WebSocket status for **Now Playing** metadata, live renderer connection badges (`Connected`, `Ready`, `Error`, `Stopped`), incoming vs. outgoing bit depth/sample rate/format, CPU load, and Raspberry Pi temperature.
+  - Zero-config mDNS access at `http://hydrasound.local:8000` with live interface/IP summary, **DHCP / Static IP**, and **Wi-Fi** scan/country/connect (`nmcli`).
+- **System Updater, Power Control & SD-Safe Logging:**
+  - **Web GUI Release & Branch Updater:** Check GitHub Releases (or `main`) and install updates + restart `hydrasound.service` directly from the **System** tab without SSH, plus per-module upstream updates in the **Renderers** tab.
+  - **SD-Safe File Logging:** Bounded 500-entry rolling log (`hydrasound.log`) with View, Download, and Clear controls — **Off by default** to prevent SD card wear, toggleable live in the **System** tab.
+  - Safe **Reboot** and **Shutdown** buttons for headless operation.
 
 ---
 
