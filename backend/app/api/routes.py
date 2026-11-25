@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.audio.alsa import list_audio_devices
+from app.audio.alsa import get_device_capabilities, list_audio_devices
 from app.config import (
     AudioOutputConfig,
     HydraConfig,
@@ -95,6 +95,11 @@ async def get_config(request: Request) -> dict:
 @router.get("/audio/devices")
 async def get_audio_devices() -> list[dict]:
     return [asdict(d) for d in list_audio_devices()]
+
+
+@router.get("/audio/capabilities")
+async def get_audio_capabilities(device_id: str) -> dict:
+    return get_device_capabilities(device_id)
 
 
 @router.put("/config/audio")

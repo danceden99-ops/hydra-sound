@@ -166,3 +166,42 @@ def _format_to_bits(fmt: Optional[str]) -> Optional[int]:
     if "DSD" in fmt:
         return 1
     return None
+
+
+def get_device_capabilities(device_id: str) -> dict:
+    """Inspect ALSA hardware capabilities (rates, formats, channels) for USB DAC / HDMI."""
+    m = re.match(r"^(?:hw|plughw):(\d+),(\d+)$", device_id.strip())
+    if not m:
+        return {"device_id": device_id, "error": "Invalid ALSA device ID"}
+
+    card, _dev = m.group(1), m.group(2)
+    usb_stream = ""
+    stream0 = Path(f"/proc/asound/card{card}/stream0")
+    if stream0.exists():
+        try:
+            usb_stream = stream0.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+
+    hw_dump = ""
+    try:
+        res = subprocess.run(
+            ["aplay", "-D", device_id.strip(), "--dump-hw-params", "-d", "1", "/dev/zero"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        raw = (res.stderr or "") + "\n" + (res.stdout or "")
+        lines = [
+            ln for ln in raw.splitlines()
+            if any(k in ln for k in ("ACCESS:", "FORMAT:", "SUBFORMAT:", "CHANNELS:", "RATE:", "PERIOD_"))
+        ]
+        hw_dump = "\n".join(lines).strip()
+    except Exception as exc:
+        hw_dump = f"Unable to probe ALSA hw_params: {exc}"
+
+    return {
+        "device_id": device_id,
+        "hw_params": hw_dump or "No hardware parameters reported (device may be busy or unavailable).",
+        "usb_stream": usb_stream,
+    }

@@ -185,6 +185,19 @@ $("save-audio").addEventListener("click", async () => {
   showToast("Audio settings applied");
 });
 
+$("btn-audio-caps").addEventListener("click", async () => {
+  const devId = $("audio-device").value;
+  const out = $("audio-caps-output");
+  out.hidden = false;
+  out.textContent = `Probing capabilities for ${devId}…`;
+  const caps = await api(`/api/audio/capabilities?device_id=${encodeURIComponent(devId)}`);
+  let text = `Device: ${caps.device_id}\n\n[ALSA Hardware Parameters]\n${caps.hw_params}`;
+  if (caps.usb_stream) {
+    text += `\n\n[USB Audio Descriptor (/proc/asound/.../stream0)]\n${caps.usb_stream}`;
+  }
+  out.textContent = text;
+});
+
 $("save-volume").addEventListener("click", async () => {
   await api("/api/config/volume", "PUT", {
     mode: $("vol-mode").value,
