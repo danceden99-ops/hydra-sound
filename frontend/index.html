@@ -384,7 +384,11 @@
               <button class="btn btn-sm btn-danger" id="btn-clear-logs">Clear Logs</button>
             </div>
           </div>
-          <div id="sys-logs-meta" class="hint">Click "Refresh Logs" to view the latest entries.</div>
+          <label class="toggle" style="margin: 8px 0;">
+            <input type="checkbox" id="sys-logging-enabled" />
+            <span>Enable File Logging (writes to SD card; off by default)</span>
+          </label>
+          <div id="sys-logs-meta" class="hint">File logging is disabled (SD card protection).</div>
           <pre id="sys-logs-output" class="hint" style="margin-top: 10px; max-height: 280px; overflow: auto; white-space: pre-wrap; background: var(--surface); padding: 10px; border-radius: 6px; border: 1px solid var(--border);"></pre>
         </div>
       </div>

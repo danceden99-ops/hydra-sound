@@ -273,14 +273,16 @@ async def get_system_version(request: Request) -> dict:
 
 @router.get("/system/logs")
 async def get_system_logs(request: Request) -> dict:
+    cfg: HydraConfig = request.app.state.config_store.get()
     handler = getattr(request.app.state, "log_handler", None)
     if not handler:
-        return {"lines": [], "count": 0, "path": ""}
+        return {"lines": [], "count": 0, "path": "", "enabled": cfg.system.logging_enabled}
     lines = handler.get_lines()
     return {
         "lines": lines,
         "count": len(lines),
         "path": str(handler.log_path),
+        "enabled": handler.is_enabled(),
     }
 
 
@@ -310,6 +312,9 @@ async def update_system_config(payload: SystemConfig, request: Request) -> dict:
     cfg: HydraConfig = state.config_store.get()
     cfg.system = payload
     state.config_store.save(cfg)
+    handler = getattr(state, "log_handler", None)
+    if handler:
+        handler.set_enabled(payload.logging_enabled)
     return {"ok": True, "system": cfg.system.model_dump()}
 
 

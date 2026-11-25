@@ -24,15 +24,32 @@ class Rolling500FileHandler(logging.Handler):
     """Keeps at most `max_entries` (default 500) log lines and overwrites the file."""
 
     def __init__(
-        self, log_path: Optional[Path] = None, max_entries: int = 500
+        self,
+        log_path: Optional[Path] = None,
+        max_entries: int = 500,
+        enabled: bool = False,
     ) -> None:
         super().__init__()
         self.log_path = log_path or default_log_path()
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.max_entries = max_entries
         self._lock = threading.Lock()
+        self._enabled = enabled
         self._lines: deque[str] = deque(maxlen=max_entries)
-        self._load_existing()
+        if self._enabled:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            self._load_existing()
+
+    def is_enabled(self) -> bool:
+        with self._lock:
+            return self._enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            self._enabled = enabled
+            if enabled:
+                self.log_path.parent.mkdir(parents=True, exist_ok=True)
+                if not self._lines:
+                    self._load_existing()
 
     def _load_existing(self) -> None:
         if self.log_path.exists():
@@ -44,8 +61,10 @@ class Rolling500FileHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            msg = self.format(record)
             with self._lock:
+                if not self._enabled:
+                    return
+                msg = self.format(record)
                 self._lines.append(msg)
                 self._write_locked()
         except Exception:

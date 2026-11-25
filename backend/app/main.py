@@ -30,15 +30,17 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log_handler = Rolling500FileHandler(max_entries=500)
+    config_store = ConfigStore()
+    cfg = config_store.get()
+
+    log_handler = Rolling500FileHandler(
+        max_entries=500, enabled=cfg.system.logging_enabled
+    )
     log_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
     root_logger = logging.getLogger()
     root_logger.addHandler(log_handler)
-
-    config_store = ConfigStore()
-    cfg = config_store.get()
 
     camilla = CamillaDSPManager()
     pipeline = AudioPipelineManager(camilla)

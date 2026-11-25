@@ -182,6 +182,11 @@ async function loadInitialConfig() {
   updateStaticIpFieldsState();
 
   $("sys-github-repo").value = cfg.system?.github_repo || verInfo.github_repo || "";
+  const loggingEnabled = Boolean(cfg.system?.logging_enabled);
+  $("sys-logging-enabled").checked = loggingEnabled;
+  $("sys-logs-meta").textContent = loggingEnabled
+    ? 'File logging is enabled. Click "Refresh Logs" to view the latest entries.'
+    : "File logging is disabled (SD card protection).";
   const latestTag = verInfo.latest_github_tag ? ` | Latest GitHub Release: ${verInfo.latest_github_tag}` : "";
   $("sys-version-info").textContent =
     `App v${verInfo.app_version} (${verInfo.git_tag} / ${verInfo.git_commit})${latestTag} — Python ${verInfo.python_version}`;
@@ -387,7 +392,8 @@ $("btn-connect-wifi").addEventListener("click", async () => {
 
 $("btn-save-repo").addEventListener("click", async () => {
   const repo = $("sys-github-repo").value.trim();
-  await api("/api/config/system", "PUT", { github_repo: repo });
+  const loggingEnabled = $("sys-logging-enabled").checked;
+  await api("/api/config/system", "PUT", { github_repo: repo, logging_enabled: loggingEnabled });
   showToast("GitHub repository saved");
 });
 
@@ -397,7 +403,10 @@ $("btn-check-releases").addEventListener("click", async () => {
     showToast("Enter GitHub Repository (owner/repo) first");
     return;
   }
-  await api("/api/config/system", "PUT", { github_repo: repo });
+  await api("/api/config/system", "PUT", {
+    github_repo: repo,
+    logging_enabled: $("sys-logging-enabled").checked,
+  });
   $("sys-release-msg").textContent = `Checking GitHub releases for ${repo}…`;
   const releases = await api("/api/system/releases");
   const sel = $("sys-release-select");
@@ -453,11 +462,21 @@ $("btn-shutdown").addEventListener("click", async () => {
 
 async function loadSystemLogs() {
   const data = await api("/api/system/logs");
-  $("sys-logs-meta").textContent = `Showing ${data.count} / 500 entries (${data.path || "log file"})`;
+  const statusLabel = data.enabled ? "Enabled" : "Disabled";
+  $("sys-logs-meta").textContent =
+    `Logging: ${statusLabel} — Showing ${data.count} / 500 entries (${data.path || "log file"})`;
   const out = $("sys-logs-output");
   out.textContent = data.lines.length ? data.lines.join("\n") : "(Log is empty)";
   out.scrollTop = out.scrollHeight;
 }
+
+$("sys-logging-enabled").addEventListener("change", async () => {
+  const enabled = $("sys-logging-enabled").checked;
+  const repo = $("sys-github-repo").value.trim();
+  await api("/api/config/system", "PUT", { github_repo: repo, logging_enabled: enabled });
+  showToast(enabled ? "File logging enabled" : "File logging disabled (SD card protection)");
+  await loadSystemLogs();
+});
 
 $("btn-refresh-logs").addEventListener("click", loadSystemLogs);
 
