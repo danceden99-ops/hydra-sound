@@ -97,7 +97,12 @@ class RendererAdapter(ABC):
             if self.connection_status != "connected":
                 self.connection_status = "advertising"
                 self.connection_detail = "Discoverable on LAN"
-        elif " error " in low and "mdns_sd::service_daemon" not in low:
+        elif (
+            " ERROR " in line
+            or "ERROR:" in line
+            or "panicked at" in low
+            or "fatal" in low
+        ) and "mdns_sd::service_daemon" not in low:
             self.connection_status = "error"
             self.connection_detail = line[:120]
 
