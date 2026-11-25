@@ -34,14 +34,11 @@ class SpotifyRenderer(RendererAdapter):
             alsa_device,
             "--bitrate",
             str(sc.bitrate),
-            "--format",
-            "S32",
             "--onevent",
             "/opt/hydrasound/scripts/hooks/librespot_event.sh",
-            "--enable-volume-normalisation",
         ]
         if cfg.volume.mode == "disabled":
-            cmd.extend(["--mixer", "alsa", "--initial-volume", "100"])
+            cmd.extend(["--volume-ctrl", "fixed", "--initial-volume", "100"])
         else:
             cmd.extend(["--initial-volume", str(cfg.volume.current_volume)])
 

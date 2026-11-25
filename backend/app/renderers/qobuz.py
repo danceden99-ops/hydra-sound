@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
@@ -24,15 +26,18 @@ class QobuzRenderer(RendererAdapter):
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         qc = cfg.renderers.qobuz
-        cmd = [
-            "pibuz",
-            "--name",
-            qc.device_name,
-            "--alsa-device",
-            alsa_device,
-            "--on-event",
-            "/opt/hydrasound/scripts/hooks/pibuz_event.sh",
-        ]
-        if qc.auth_mode == "credentials" and qc.email and qc.password:
-            cmd.extend(["--email", qc.email, "--password", qc.password])
-        return cmd
+        # Apply device name & ALSA settings via pibuz settings CLI before running daemon
+        try:
+            subprocess.run(
+                ["pibuz", "settings", "set", "qconnect.device_name", qc.device_name],
+                capture_output=True,
+                timeout=3,
+            )
+            subprocess.run(
+                ["pibuz", "settings", "set", "audio.device", alsa_device],
+                capture_output=True,
+                timeout=3,
+            )
+        except Exception:
+            pass
+        return ["pibuz", "run"]

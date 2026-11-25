@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -48,8 +49,14 @@ class RendererAdapter(ABC):
             self._proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
             )
+            threading.Thread(
+                target=self._drain_stderr,
+                args=(self._proc,),
+                daemon=True,
+            ).start()
             logger.info("Started renderer %s on %s", self.meta.id, alsa_device)
             return True
         except FileNotFoundError:
@@ -59,6 +66,17 @@ class RendererAdapter(ABC):
                 self.meta.id,
             )
             return False
+
+    def _drain_stderr(self, proc: subprocess.Popen) -> None:
+        if not proc.stderr:
+            return
+        try:
+            for line in proc.stderr:
+                clean = line.strip()
+                if clean:
+                    logger.warning("[%s] %s", self.meta.id, clean)
+        except Exception:
+            pass
 
     def stop(self) -> None:
         if self._proc and self._proc.poll() is None:
