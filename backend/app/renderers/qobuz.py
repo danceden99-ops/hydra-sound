@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
+from app.audio.alsa import format_named_alsa_device
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
@@ -26,16 +27,9 @@ class QobuzRenderer(RendererAdapter):
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         qc = cfg.renderers.qobuz
-        target_device = alsa_device
         is_loopback = "loopback" in alsa_device.lower()
-        if (
-            "hdmi" in cfg.audio.device_name.lower()
-            and alsa_device.startswith("hw:")
-            and not is_loopback
-        ):
-            card_dev = alsa_device.split(":", 1)[1].split(",")
-            if len(card_dev) == 2:
-                target_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
+        is_hdmi = "hdmi" in cfg.audio.device_name.lower()
+        target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
 
         alsa_plugin = "plughw" if is_loopback else "hw"
 

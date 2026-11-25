@@ -42,6 +42,32 @@ def _classify_device(card_id: str, card_name: str, dev_name: str) -> str:
             return "usb"
     if "headphones" in combined or "bcm2835" in combined or "analog" in combined:
         return "analog"
+
+
+def resolve_card_id(card: str) -> str:
+    """Resolve numeric ALSA card index (e.g. '1') to card ID (e.g. 'vc4hdmi0')."""
+    proc_id = Path(f"/proc/asound/card{card}/id")
+    try:
+        if proc_id.exists():
+            val = proc_id.read_text(encoding="utf-8").strip()
+            if val:
+                return val
+    except Exception:
+        pass
+    return card
+
+
+def format_named_alsa_device(alsa_device: str, is_hdmi: bool = False) -> str:
+    """Convert `hw:X,Y` to `hdmi:CARD=<id>,DEV=Y` or `hw:CARD=<id>,DEV=Y` for `aplay -L` enumeration."""
+    if "loopback" in alsa_device.lower() or not alsa_device.startswith("hw:"):
+        return alsa_device
+    parts = alsa_device.split(":", 1)[1].split(",")
+    if len(parts) != 2:
+        return alsa_device
+    card_id = resolve_card_id(parts[0].strip())
+    dev = parts[1].strip()
+    prefix = "hdmi" if is_hdmi else "hw"
+    return f"{prefix}:CARD={card_id},DEV={dev}"
     return "other"
 
 
