@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
-SHAIRPORT_CONF = Path("/etc/hydrasound/shairport-sync.conf")
+
+def _get_shairport_conf_path() -> Path:
+    cfg_env = os.environ.get("HYDRA_CONFIG_PATH")
+    if cfg_env:
+        return Path(cfg_env).parent / "shairport-sync.conf"
+    etc_dir = Path("/etc/hydrasound")
+    if etc_dir.exists() and os.access(etc_dir, os.W_OK):
+        return etc_dir / "shairport-sync.conf"
+    return Path(__file__).resolve().parents[2] / "data" / "shairport-sync.conf"
 
 
 class AirPlayRenderer(RendererAdapter):
@@ -27,7 +36,8 @@ class AirPlayRenderer(RendererAdapter):
         return cfg.renderers.airplay.enabled
 
     def write_config(self, cfg: HydraConfig, alsa_device: str) -> Path:
-        SHAIRPORT_CONF.parent.mkdir(parents=True, exist_ok=True)
+        conf_path = _get_shairport_conf_path()
+        conf_path.parent.mkdir(parents=True, exist_ok=True)
         ap = cfg.renderers.airplay
         ignore_vol = "yes" if cfg.volume.mode == "disabled" else "no"
         conf = f"""general = {{
@@ -48,8 +58,8 @@ sessioncontrol = {{
   run_this_after_play_ends = "/opt/hydrasound/scripts/hooks/airplay_event.sh stop";
 }};
 """
-        SHAIRPORT_CONF.write_text(conf, encoding="utf-8")
-        return SHAIRPORT_CONF
+        conf_path.write_text(conf, encoding="utf-8")
+        return conf_path
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         conf_path = self.write_config(cfg, alsa_device)

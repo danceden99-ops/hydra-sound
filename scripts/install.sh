@@ -16,7 +16,11 @@ apt-get update
 apt-get install -y \
   python3 python3-venv python3-pip \
   alsa-utils avahi-daemon network-manager \
+  shairport-sync gmediarender gstreamer1.0-alsa gstreamer1.0-plugins-good \
   curl git build-essential pkg-config
+
+# Let Hydra Sound orchestrator manage shairport-sync & gmediarender
+systemctl disable --now shairport-sync gmediarender || true
 
 # Enable ALSA Loopback for Dynamic DSP Mode
 if ! grep -q "^snd-aloop" /etc/modules; then
@@ -28,8 +32,11 @@ modprobe snd-aloop || true
 hostnamectl set-hostname hydrasound
 systemctl enable --now avahi-daemon
 
-# Copy application files
+# Copy application files (including .git for Web GUI release updates)
 cp -r backend frontend scripts systemd "$APP_DIR/"
+if [[ -d .git ]]; then
+  cp -r .git "$APP_DIR/"
+fi
 chmod +x "$APP_DIR"/scripts/*.sh "$APP_DIR"/scripts/modules/*.sh "$APP_DIR"/scripts/hooks/*.sh
 
 # Python virtualenv

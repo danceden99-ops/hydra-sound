@@ -99,7 +99,7 @@ class RenderersConfig(BaseModel):
 
 
 class SystemConfig(BaseModel):
-    github_repo: str = ""  # e.g. "your-username/hydra-sound"
+    github_repo: str = "danceden99-ops/hydra-sound"
 
 
 class HydraConfig(BaseModel):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -16,7 +17,16 @@ from app.config import AudioOutputConfig, VolumeConfig
 
 logger = logging.getLogger(__name__)
 
-CAMILLA_CONFIG_PATH = Path("/etc/hydrasound/camilladsp.yml")
+def _default_camilla_config_path() -> Path:
+    cfg_env = os.environ.get("HYDRA_CONFIG_PATH")
+    if cfg_env:
+        return Path(cfg_env).parent / "camilladsp.yml"
+    etc_dir = Path("/etc/hydrasound")
+    if etc_dir.exists() and os.access(etc_dir, os.W_OK):
+        return etc_dir / "camilladsp.yml"
+    return Path(__file__).resolve().parents[2] / "data" / "camilladsp.yml"
+
+
 CAMILLA_WS_PORT = 1234
 
 RESAMPLER_PROFILES = {
@@ -99,7 +109,7 @@ class CamillaDSPManager:
     """Manages the CamillaDSP daemon and real-time 32-bit+ volume updates."""
 
     def __init__(self, config_path: Optional[Path] = None) -> None:
-        self.config_path = config_path or CAMILLA_CONFIG_PATH
+        self.config_path = config_path or _default_camilla_config_path()
         self._proc: Optional[subprocess.Popen] = None
         self.running = False
 
