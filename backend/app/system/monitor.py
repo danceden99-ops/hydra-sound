@@ -253,6 +253,25 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
                 text=True,
                 timeout=120,
             )
+
+        # Also update prebuilt ARM64 streaming binaries if attached to this release tag
+        if clean_tag != "main" and platform.machine() == "aarch64":
+            asset_url = (
+                f"https://github.com/{repo.strip()}/releases/download/"
+                f"{clean_tag}/hydra-sound-arm64-binaries.tar.gz"
+            )
+            subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f'TMP=$(mktemp -d) && curl -fsSL "{asset_url}" -o "$TMP/b.tar.gz" '
+                    '&& tar -xzf "$TMP/b.tar.gz" -C /usr/local/bin librespot pibuz '
+                    '&& chmod +x /usr/local/bin/librespot /usr/local/bin/pibuz; rm -rf "$TMP"',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
         return {"ok": True, "tag": clean_tag, "restart_required": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
