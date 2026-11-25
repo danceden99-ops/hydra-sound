@@ -55,7 +55,7 @@ def test_camilladsp_config_generation() -> None:
     assert cfg["devices"]["samplerate"] == 96000
     assert cfg["devices"]["playback"]["device"] == "hw:2,0"
     assert cfg["devices"]["playback"]["format"] == "S24_3_LE"
-    assert cfg["devices"]["resampler"]["profile"] == "VeryAccurate"
+    assert cfg["devices"]["resampler"]["profile"] == "Accurate"
     assert "master_volume" in cfg["filters"]
 
 

@@ -30,10 +30,10 @@ def _default_camilla_config_path() -> Path:
 CAMILLA_WS_PORT = 1234
 
 RESAMPLER_PROFILES = {
-    "SincVeryHigh": {"type": "Synchronous", "profile": "VeryAccurate"},
-    "SincHigh": {"type": "Synchronous", "profile": "Accurate"},
-    "SincMedium": {"type": "Synchronous", "profile": "Balanced"},
-    "SincFast": {"type": "Synchronous", "profile": "Fast"},
+    "SincVeryHigh": {"type": "AsyncSinc", "profile": "Accurate"},
+    "SincHigh": {"type": "AsyncSinc", "profile": "Balanced"},
+    "SincMedium": {"type": "AsyncSinc", "profile": "Fast"},
+    "SincFast": {"type": "AsyncSinc", "profile": "VeryFast"},
 }
 
 
@@ -89,6 +89,7 @@ def build_camilladsp_config(
         profile = RESAMPLER_PROFILES.get(
             audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
         )
+        devices["enable_rate_adjust"] = True
         devices["resampler"] = {
             "type": "AsyncSinc",
             "profile": profile["profile"],
