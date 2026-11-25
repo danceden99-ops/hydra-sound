@@ -192,47 +192,58 @@ class NetworkManager:
 
         return {"ok": len(errors) == 0, "errors": errors}
 
-    def scan_wifi(self) -> list[Dict[str, object]]:
-        """Scan nearby Wi-Fi networks via `nmcli`."""
+    def scan_wifi(self, country: str = "") -> list[Dict[str, object]]:
+        """Unblock Wi-Fi if needed, ensure radio is on, and scan via `nmcli`."""
+        import re
+        import time
+
+        if country:
+            self.set_wifi_country(country)
+        else:
+            try:
+                subprocess.run(["rfkill", "unblock", "wifi"], capture_output=True, timeout=3)
+            except Exception:
+                pass
         try:
-            res = subprocess.run(
-                [
-                    "nmcli",
-                    "-t",
-                    "-f",
-                    "SSID,SIGNAL,SECURITY",
-                    "dev",
-                    "wifi",
-                    "list",
-                    "--rescan",
-                    "yes",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if res.returncode != 0:
-                return []
-            seen: set[str] = set()
-            networks: list[Dict[str, object]] = []
-            for line in res.stdout.splitlines():
-                parts = line.split(":")
-                if len(parts) < 3:
-                    continue
-                ssid = parts[0].strip()
-                if not ssid or ssid in seen:
-                    continue
-                seen.add(ssid)
-                networks.append(
-                    {
-                        "ssid": ssid,
-                        "signal": int(parts[1]) if parts[1].isdigit() else 0,
-                        "security": parts[2].strip() or "Open",
-                    }
-                )
-            return sorted(networks, key=lambda n: int(n["signal"]), reverse=True)
+            subprocess.run(["nmcli", "radio", "wifi", "on"], capture_output=True, timeout=3)
         except Exception:
+            pass
+
+        stdout = ""
+        for args in (
+            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list", "--rescan", "yes"],
+            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "dev", "wifi", "list"],
+        ):
+            try:
+                res = subprocess.run(args, capture_output=True, text=True, timeout=15)
+                if res.returncode == 0 and res.stdout.strip():
+                    stdout = res.stdout
+                    break
+                time.sleep(1)
+            except Exception:
+                pass
+
+        if not stdout:
             return []
+
+        seen: set[str] = set()
+        networks: list[Dict[str, object]] = []
+        for line in stdout.splitlines():
+            parts = re.split(r"(?<!\\):", line)
+            if len(parts) < 3:
+                continue
+            ssid = parts[0].replace("\\:", ":").strip()
+            if not ssid or ssid in seen:
+                continue
+            seen.add(ssid)
+            networks.append(
+                {
+                    "ssid": ssid,
+                    "signal": int(parts[1]) if parts[1].isdigit() else 0,
+                    "security": parts[2].strip() or "Open",
+                }
+            )
+        return sorted(networks, key=lambda n: int(n["signal"]), reverse=True)
 
     def set_wifi_country(self, country_code: str) -> None:
         """Set Wi-Fi regulatory domain and unblock rfkill on Raspberry Pi."""

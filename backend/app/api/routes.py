@@ -237,8 +237,10 @@ async def update_network_config(payload: NetworkConfig, request: Request) -> dic
 
 
 @router.get("/network/wifi/scan")
-async def scan_wifi_networks(request: Request) -> list[dict]:
-    return request.app.state.network_manager.scan_wifi()
+async def scan_wifi_networks(request: Request, country: str = "") -> list[dict]:
+    cfg: HydraConfig = request.app.state.config_store.get()
+    cc = (country or cfg.network.wifi_country or "US").strip().upper()
+    return request.app.state.network_manager.scan_wifi(country=cc)
 
 
 @router.post("/network/wifi/connect")

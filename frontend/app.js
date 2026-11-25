@@ -328,7 +328,8 @@ $("save-network").addEventListener("click", async () => {
 
 $("btn-scan-wifi").addEventListener("click", async () => {
   $("wifi-status-msg").textContent = "Scanning nearby Wi-Fi networks…";
-  const nets = await api("/api/network/wifi/scan");
+  const country = encodeURIComponent($("wifi-country").value.trim().toUpperCase() || "US");
+  const nets = await api(`/api/network/wifi/scan?country=${country}`);
   const sel = $("wifi-scan-list");
   sel.innerHTML = '<option value="">-- Select a Wi-Fi network --</option>';
   nets.forEach((n) => {
