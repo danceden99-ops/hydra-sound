@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import subprocess
@@ -38,17 +39,21 @@ class VolumeController:
     ) -> None:
         self.camilla = camilla
         self.on_volume_changed = on_volume_changed
+        self._lock = asyncio.Lock()
 
     def clamp_volume(self, value: int, cfg: VolumeConfig) -> int:
-        return max(0, min(cfg.max_volume, value))
+        max_allowed = max(1, min(100, int(cfg.max_volume)))
+        return max(0, min(max_allowed, int(value)))
 
     async def apply_power_on(
         self, audio_cfg: AudioOutputConfig, vol_cfg: VolumeConfig
     ) -> VolumeConfig:
-        vol_cfg.current_volume = self.clamp_volume(vol_cfg.power_on_volume, vol_cfg)
-        vol_cfg.muted = False
-        await self.apply(audio_cfg, vol_cfg)
-        return vol_cfg
+        async with self._lock:
+            vol_cfg.power_on_volume = self.clamp_volume(vol_cfg.power_on_volume, vol_cfg)
+            vol_cfg.current_volume = vol_cfg.power_on_volume
+            vol_cfg.muted = False
+            await self._apply_locked(audio_cfg, vol_cfg, notify_client=True)
+            return vol_cfg
 
     async def set_volume(
         self,
@@ -57,11 +62,12 @@ class VolumeController:
         vol_cfg: VolumeConfig,
         notify_client: bool = True,
     ) -> VolumeConfig:
-        if vol_cfg.mode == "disabled":
+        async with self._lock:
+            if vol_cfg.mode == "disabled":
+                return vol_cfg
+            vol_cfg.current_volume = self.clamp_volume(level, vol_cfg)
+            await self._apply_locked(audio_cfg, vol_cfg, notify_client=notify_client)
             return vol_cfg
-        vol_cfg.current_volume = self.clamp_volume(level, vol_cfg)
-        await self.apply(audio_cfg, vol_cfg, notify_client=notify_client)
-        return vol_cfg
 
     async def step_volume(
         self,
@@ -69,19 +75,25 @@ class VolumeController:
         audio_cfg: AudioOutputConfig,
         vol_cfg: VolumeConfig,
     ) -> VolumeConfig:
-        delta = vol_cfg.step_size if direction > 0 else -vol_cfg.step_size
-        return await self.set_volume(
-            vol_cfg.current_volume + delta, audio_cfg, vol_cfg, notify_client=True
-        )
+        async with self._lock:
+            if vol_cfg.mode == "disabled":
+                return vol_cfg
+            delta = vol_cfg.step_size if direction > 0 else -vol_cfg.step_size
+            vol_cfg.current_volume = self.clamp_volume(
+                vol_cfg.current_volume + delta, vol_cfg
+            )
+            await self._apply_locked(audio_cfg, vol_cfg, notify_client=True)
+            return vol_cfg
 
     async def toggle_mute(
         self, audio_cfg: AudioOutputConfig, vol_cfg: VolumeConfig
     ) -> VolumeConfig:
-        if vol_cfg.mode == "disabled":
+        async with self._lock:
+            if vol_cfg.mode == "disabled":
+                return vol_cfg
+            vol_cfg.muted = not vol_cfg.muted
+            await self._apply_locked(audio_cfg, vol_cfg, notify_client=True)
             return vol_cfg
-        vol_cfg.muted = not vol_cfg.muted
-        await self.apply(audio_cfg, vol_cfg, notify_client=True)
-        return vol_cfg
 
     async def apply(
         self,
@@ -89,8 +101,19 @@ class VolumeController:
         vol_cfg: VolumeConfig,
         notify_client: bool = True,
     ) -> None:
+        async with self._lock:
+            await self._apply_locked(audio_cfg, vol_cfg, notify_client=notify_client)
+
+    async def _apply_locked(
+        self,
+        audio_cfg: AudioOutputConfig,
+        vol_cfg: VolumeConfig,
+        notify_client: bool = True,
+    ) -> None:
         if vol_cfg.mode == "disabled":
             return
+
+        vol_cfg.current_volume = self.clamp_volume(vol_cfg.current_volume, vol_cfg)
 
         if vol_cfg.mode == "hardware":
             self._apply_hardware_alsa(audio_cfg.device_id, vol_cfg)
@@ -106,7 +129,8 @@ class VolumeController:
         if ":" in device_id:
             card = device_id.split(":", 1)[1].split(",", 1)[0]
         mixer = vol_cfg.hardware_mixer_name or "PCM"
-        target = "0%" if vol_cfg.muted else f"{vol_cfg.current_volume}%"
+        safe_level = self.clamp_volume(vol_cfg.current_volume, vol_cfg)
+        target = "0%" if vol_cfg.muted else f"{safe_level}%"
         try:
             res = subprocess.run(
                 ["amixer", "-c", card, "sset", mixer, target],

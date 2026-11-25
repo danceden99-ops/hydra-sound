@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import asyncio
 import json
 import logging
 import os
@@ -163,15 +164,27 @@ class CamillaDSPManager:
         self.running = False
 
     async def set_volume_db(self, db: float, muted: bool = False) -> None:
-        """Send live volume/mute update to CamillaDSP via WebSocket."""
+        """Send live volume/mute update to CamillaDSP via WebSocket (retrying startup)."""
         if not self.running:
             return
+        if self._proc and self._proc.poll() is not None:
+            self.running = False
+            logger.warning("CamillaDSP process exited; cannot apply volume %.2f dB", db)
+            return
         uri = f"ws://127.0.0.1:{CAMILLA_WS_PORT}"
-        try:
-            async with websockets.connect(uri, open_timeout=1.5) as ws:
-                await ws.send(json.dumps({"SetVolume": db}))
-                await ws.recv()
-                await ws.send(json.dumps({"SetMute": muted}))
-                await ws.recv()
-        except Exception as exc:
-            logger.debug("CamillaDSP WebSocket update skipped: %s", exc)
+        last_exc: Optional[Exception] = None
+        for attempt in range(25):
+            if not self.running or (self._proc and self._proc.poll() is not None):
+                return
+            try:
+                async with websockets.connect(uri, open_timeout=1.5) as ws:
+                    await ws.send(json.dumps({"SetVolume": db}))
+                    await ws.recv()
+                    await ws.send(json.dumps({"SetMute": muted}))
+                    await ws.recv()
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 24:
+                    await asyncio.sleep(0.1)
+        logger.warning("CamillaDSP WebSocket volume update failed after retries: %s", last_exc)

@@ -111,6 +111,7 @@ async def update_audio_config(payload: AudioOutputConfig, request: Request) -> d
     cfg.audio = payload
     state.config_store.save(cfg)
     state.orchestrator.start_enabled_renderers(cfg)
+    await state.volume_controller.apply(cfg.audio, cfg.volume)
     return {"ok": True, "audio": cfg.audio.model_dump()}
 
 
@@ -120,6 +121,9 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
     cfg: HydraConfig = state.config_store.get()
     mode_changed = cfg.volume.mode != payload.mode
     cfg.volume = payload
+    cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
+        cfg.volume.power_on_volume, cfg.volume
+    )
     cfg.volume.current_volume = state.volume_controller.clamp_volume(
         cfg.volume.current_volume, cfg.volume
     )

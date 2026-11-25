@@ -67,6 +67,29 @@ def test_volume_curves_and_limits() -> None:
     ctrl = VolumeController(CamillaDSPManager())
     vol_cfg = VolumeConfig(mode="software", max_volume=75, power_on_volume=90)
     assert ctrl.clamp_volume(90, vol_cfg) == 75
+    assert ctrl.clamp_volume(-5, vol_cfg) == 0
+
+
+@pytest.mark.asyncio
+async def test_volume_max_limit_enforced_across_all_paths() -> None:
+    ctrl = VolumeController(CamillaDSPManager())
+    audio = AudioOutputConfig(device_id="hw:1,0")
+    vol_cfg = VolumeConfig(mode="software", max_volume=60, power_on_volume=95, current_volume=90)
+
+    await ctrl.apply_power_on(audio, vol_cfg)
+    assert vol_cfg.power_on_volume == 60
+    assert vol_cfg.current_volume == 60
+
+    await ctrl.set_volume(100, audio, vol_cfg)
+    assert vol_cfg.current_volume == 60
+
+    await ctrl.step_volume(1, audio, vol_cfg)
+    assert vol_cfg.current_volume == 60
+
+    # Even if mutated directly, apply() clamps before dispatching
+    vol_cfg.current_volume = 100
+    await ctrl.apply(audio, vol_cfg)
+    assert vol_cfg.current_volume == 60
 
 
 @pytest.mark.asyncio
