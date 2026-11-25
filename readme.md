@@ -58,10 +58,11 @@ Because Hydra Sound relies on open-source protocol implementations, please note 
 
 1. Flash **Raspberry Pi OS Lite (64-bit)** (Debian Bookworm or newer) and boot your Pi.
 2. *(Optional)* Enable SSH if you are running headless (either in Raspberry Pi Imager or via `sudo raspi-config` → **Interface Options** → **SSH**).
-3. Install `git` so you can clone the repository:
+3. Update Raspberry Pi OS packages to the latest versions and install `git`:
    ```bash
-   sudo apt update
-   sudo apt install -y git
+   sudo apt-get update
+   sudo apt-get upgrade -y
+   sudo apt-get install -y git
    ```
 4. Clone the repository and run the installer:
    ```bash
