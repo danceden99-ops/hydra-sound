@@ -108,10 +108,18 @@ class VolumeController:
         mixer = vol_cfg.hardware_mixer_name or "PCM"
         target = "0%" if vol_cfg.muted else f"{vol_cfg.current_volume}%"
         try:
-            subprocess.run(
+            res = subprocess.run(
                 ["amixer", "-c", card, "sset", mixer, target],
                 capture_output=True,
+                text=True,
                 timeout=2,
             )
+            if res.returncode != 0:
+                logger.warning(
+                    "ALSA hardware mixer '%s' on card %s failed: %s",
+                    mixer,
+                    card,
+                    (res.stderr or res.stdout).strip(),
+                )
         except Exception as exc:
-            logger.debug("ALSA hardware mixer update failed: %s", exc)
+            logger.warning("ALSA hardware mixer update failed: %s", exc)
