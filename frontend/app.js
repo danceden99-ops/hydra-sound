@@ -72,12 +72,28 @@ function connectWebSocket() {
   ws.onclose = () => setTimeout(connectWebSocket, 2000);
 }
 
+let latestNetStatus = null;
+
+function updateStaticIpFieldsState() {
+  const isStatic = $("net-mode").value === "static";
+  ["net-ip", "net-mask", "net-gw", "net-dns"].forEach((id) => {
+    $(id).disabled = !isStatic;
+  });
+  if (isStatic && latestNetStatus) {
+    if (!$("net-ip").value) $("net-ip").value = latestNetStatus.ip_address || "";
+    if (!$("net-mask").value) $("net-mask").value = latestNetStatus.cidr || "24";
+    if (!$("net-gw").value) $("net-gw").value = latestNetStatus.gateway || "";
+    if (!$("net-dns").value) $("net-dns").value = latestNetStatus.dns || "";
+  }
+}
+
 async function loadInitialConfig() {
-  const [devices, cfg, irStatus, verInfo] = await Promise.all([
+  const [devices, cfg, irStatus, verInfo, liveStatus] = await Promise.all([
     api("/api/audio/devices"),
     api("/api/config"),
     api("/api/ir/status"),
     api("/api/system/version"),
+    api("/api/status"),
   ]);
 
   const devSel = $("audio-device");
@@ -121,16 +137,25 @@ async function loadInitialConfig() {
   $("ir-gpio-pin").value = cfg.ir.gpio_pin;
   $("flirc-status").textContent = `FLIRC Connected: ${irStatus.flirc.connected ? "Yes" : "No"} (${irStatus.flirc.raw})`;
 
+  latestNetStatus = liveStatus.network || {};
+  const netModeLabel = (latestNetStatus.mode || cfg.network.mode || "dhcp").toUpperCase();
+  const netIpDisplay = latestNetStatus.ip_address
+    ? `${latestNetStatus.ip_address}/${latestNetStatus.cidr || "24"}`
+    : "Unknown";
+  $("net-current-summary").textContent =
+    `Interface: ${latestNetStatus.interface || cfg.network.interface} | Mode: ${netModeLabel} | IP: ${netIpDisplay} | Gateway: ${latestNetStatus.gateway || "—"} | DNS: ${latestNetStatus.dns || "—"} | mDNS: ${cfg.network.hostname}.local`;
+
   $("net-hostname").value = cfg.network.hostname;
-  $("net-iface").value = cfg.network.interface;
-  $("net-mode").value = cfg.network.mode;
-  $("net-ip").value = cfg.network.static_ip;
-  $("net-mask").value = cfg.network.subnet_mask;
-  $("net-gw").value = cfg.network.gateway;
-  $("net-dns").value = cfg.network.dns;
-  $("net-host").textContent = `${cfg.network.hostname}.local`;
+  $("net-iface").value = latestNetStatus.interface || cfg.network.interface;
+  $("net-mode").value = latestNetStatus.mode || cfg.network.mode;
+  $("net-ip").value = cfg.network.static_ip || (latestNetStatus.mode === "static" ? latestNetStatus.ip_address : "");
+  $("net-mask").value = cfg.network.subnet_mask || latestNetStatus.cidr || "24";
+  $("net-gw").value = cfg.network.gateway || latestNetStatus.gateway || "";
+  $("net-dns").value = cfg.network.dns || latestNetStatus.dns || "";
+  $("net-host").textContent = `${cfg.network.hostname}.local (${latestNetStatus.ip_address || "—"})`;
   $("wifi-ssid").value = cfg.network.wifi_ssid || "";
   $("wifi-pass").value = cfg.network.wifi_password || "";
+  updateStaticIpFieldsState();
 
   $("sys-github-repo").value = cfg.system?.github_repo || verInfo.github_repo || "";
   const latestTag = verInfo.latest_github_tag ? ` | Latest GitHub Release: ${verInfo.latest_github_tag}` : "";
@@ -245,6 +270,8 @@ $("flirc-clear").addEventListener("click", async () => {
   const res = await api("/api/ir/flirc/clear", "POST");
   $("flirc-learn-msg").textContent = res.ok ? "FLIRC cleared." : res.error;
 });
+
+$("net-mode").addEventListener("change", updateStaticIpFieldsState);
 
 $("save-network").addEventListener("click", async () => {
   await api("/api/config/network", "PUT", {

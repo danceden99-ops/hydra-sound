@@ -111,7 +111,11 @@ def test_api_defaults_and_googlecast_disabled(tmp_path: Path, monkeypatch) -> No
 
         status_resp = client.get("/api/status")
         assert status_resp.status_code == 200
-        assert status_resp.json()["dsp_active"] is False
+        status_data = status_resp.json()
+        assert status_data["dsp_active"] is False
+        assert "ip_address" in status_data["network"]
+        assert "cidr" in status_data["network"]
+        assert "mode" in status_data["network"]
 
         # Verify custom advertised device name propagates to all renderers
         renderers_payload = data["renderers"]

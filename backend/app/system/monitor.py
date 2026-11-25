@@ -100,7 +100,7 @@ def run_module_update(adapter: RendererAdapter) -> Dict[str, object]:
             ["bash", str(script_path)],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=1200,
         )
         return {
             "ok": res.returncode == 0,
@@ -155,45 +155,73 @@ async def get_app_version_info(
 
 
 async def list_github_releases(repo: str, limit: int = 15) -> List[Dict[str, object]]:
-    """Fetch available release tags from GitHub for `owner/repo`."""
+    """Fetch available releases (or git tags fallback) from GitHub for `owner/repo`."""
     if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo.strip()):
         return []
-    url = f"https://api.github.com/repos/{repo.strip()}/releases?per_page={limit}"
+    clean_repo = repo.strip()
+    headers = {"Accept": "application/vnd.github+json"}
+    items: List[Dict[str, object]] = []
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             resp = await client.get(
-                url,
-                headers={"Accept": "application/vnd.github+json"},
+                f"https://api.github.com/repos/{clean_repo}/releases?per_page={limit}",
+                headers=headers,
             )
-            if resp.status_code != 200:
-                return []
-            return [
-                {
-                    "tag": r.get("tag_name", ""),
-                    "name": r.get("name") or r.get("tag_name", ""),
-                    "published_at": (r.get("published_at") or "")[:10],
-                    "prerelease": bool(r.get("prerelease", False)),
-                }
-                for r in resp.json()
-                if r.get("tag_name")
-            ]
+            if resp.status_code == 200:
+                items = [
+                    {
+                        "tag": r.get("tag_name", ""),
+                        "name": r.get("name") or r.get("tag_name", ""),
+                        "published_at": (r.get("published_at") or "")[:10],
+                        "prerelease": bool(r.get("prerelease", False)),
+                    }
+                    for r in resp.json()
+                    if r.get("tag_name")
+                ]
+            if not items:
+                tag_resp = await client.get(
+                    f"https://api.github.com/repos/{clean_repo}/tags?per_page={limit}",
+                    headers=headers,
+                )
+                if tag_resp.status_code == 200:
+                    items = [
+                        {
+                            "tag": t.get("name", ""),
+                            "name": t.get("name", ""),
+                            "published_at": "git tag",
+                            "prerelease": False,
+                        }
+                        for t in tag_resp.json()
+                        if t.get("name")
+                    ]
+            if resp.status_code == 200 or items:
+                items.append(
+                    {
+                        "tag": "main",
+                        "name": "main (Latest Commit)",
+                        "published_at": "branch",
+                        "prerelease": False,
+                    }
+                )
+            return items
     except Exception as exc:
         logger.debug("Failed to list GitHub releases for %s: %s", repo, exc)
         return []
 
 
 def install_github_release(repo: str, tag: str) -> Dict[str, object]:
-    """Checkout a selected GitHub release tag and reinstall Python requirements."""
+    """Checkout a selected GitHub release tag (or `main` branch) and reinstall requirements."""
     if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo.strip()):
         return {"ok": False, "error": "Invalid GitHub repository format (expected owner/repo)."}
-    if not re.match(r"^[A-Za-z0-9_.-]+$", tag.strip()):
+    clean_tag = tag.strip()
+    if not re.match(r"^[A-Za-z0-9_.-]+$", clean_tag):
         return {"ok": False, "error": "Invalid release tag format."}
 
     repo_root = Path(__file__).resolve().parents[3]
     remote_url = f"https://github.com/{repo.strip()}.git"
     try:
         fetch = subprocess.run(
-            ["git", "-C", str(repo_root), "fetch", "--tags", remote_url],
+            ["git", "-C", str(repo_root), "fetch", "--tags", remote_url, clean_tag if clean_tag == "main" else f"refs/tags/{clean_tag}:refs/tags/{clean_tag}"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -201,8 +229,14 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
         if fetch.returncode != 0:
             return {"ok": False, "error": fetch.stderr.strip() or "git fetch failed"}
 
+        target_ref = "FETCH_HEAD" if clean_tag == "main" else f"tags/{clean_tag}"
+        checkout_cmd = (
+            ["git", "-C", str(repo_root), "checkout", "-B", "main", "FETCH_HEAD"]
+            if clean_tag == "main"
+            else ["git", "-C", str(repo_root), "checkout", target_ref]
+        )
         checkout = subprocess.run(
-            ["git", "-C", str(repo_root), "checkout", f"tags/{tag.strip()}"],
+            checkout_cmd,
             capture_output=True,
             text=True,
             timeout=30,
@@ -219,6 +253,6 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
                 text=True,
                 timeout=120,
             )
-        return {"ok": True, "tag": tag.strip(), "restart_required": True}
+        return {"ok": True, "tag": clean_tag, "restart_required": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

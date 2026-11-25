@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Modular updater for Spotify Connect (librespot)
-if command -v cargo >/dev/null 2>&1; then
-  cargo install librespot --locked --force --no-default-features --features "alsa-backend"
-  ln -sf "$HOME/.cargo/bin/librespot" /usr/local/bin/librespot
-else
-  echo "Rust/cargo not installed; install rustup to build latest librespot." >&2
-  exit 1
+# Modular installer/updater for Spotify Connect (librespot)
+if ! command -v cargo >/dev/null 2>&1; then
+  apt-get update && apt-get install -y cargo rustc libasound2-dev pkg-config
 fi
+CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
+cargo install librespot --locked --force --no-default-features --features "alsa-backend"
+ln -sf "$CARGO_BIN_DIR/librespot" /usr/local/bin/librespot

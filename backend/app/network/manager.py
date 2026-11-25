@@ -16,23 +16,112 @@ class NetworkManager:
     """Manages IPv4 DHCP/Static configuration and `hydrasound.local` mDNS."""
 
     def get_status(self, cfg: NetworkConfig) -> Dict[str, object]:
-        ip_addr = self._get_local_ip()
+        ip_addr, cidr = self._get_local_ip_and_cidr()
+        active_iface = self._get_default_interface() or cfg.interface
+        live_mode = cfg.mode
+        gateway = cfg.gateway
+        dns = cfg.dns
+
+        con_name = self._find_nm_connection(active_iface)
+        if con_name:
+            nm_info = self._get_nm_details(con_name)
+            if nm_info.get("method") == "auto":
+                live_mode = "dhcp"
+            elif nm_info.get("method") == "manual":
+                live_mode = "static"
+            if nm_info.get("gateway"):
+                gateway = nm_info["gateway"]
+            if nm_info.get("dns"):
+                dns = nm_info["dns"]
+
         return {
             "hostname": cfg.hostname,
             "mdns_url": f"http://{cfg.hostname}.local",
             "ip_address": ip_addr,
-            "mode": cfg.mode,
-            "interface": cfg.interface,
+            "cidr": cidr,
+            "gateway": gateway,
+            "dns": dns,
+            "mode": live_mode,
+            "interface": active_iface,
         }
 
     @staticmethod
-    def _get_local_ip() -> str:
+    def _get_local_ip_and_cidr() -> tuple[str, str]:
+        ip_addr = "127.0.0.1"
+        cidr = "24"
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
+                ip_addr = s.getsockname()[0]
         except Exception:
-            return "127.0.0.1"
+            pass
+        try:
+            res = subprocess.run(
+                ["ip", "-o", "-4", "addr", "show"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            for line in res.stdout.splitlines():
+                if f" {ip_addr}/" in line:
+                    part = line.split(f" {ip_addr}/", 1)[1].split()[0]
+                    if part.isdigit():
+                        cidr = part
+                    break
+        except Exception:
+            pass
+        return ip_addr, cidr
+
+    @staticmethod
+    def _get_default_interface() -> str | None:
+        try:
+            res = subprocess.run(
+                ["ip", "route", "show", "default"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            parts = res.stdout.split()
+            if "dev" in parts:
+                return parts[parts.index("dev") + 1]
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _get_nm_details(con_name: str) -> Dict[str, str]:
+        details: Dict[str, str] = {}
+        try:
+            res = subprocess.run(
+                [
+                    "nmcli",
+                    "-t",
+                    "-f",
+                    "ipv4.method,IP4.GATEWAY,IP4.DNS",
+                    "connection",
+                    "show",
+                    con_name,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            for line in res.stdout.splitlines():
+                if ":" not in line:
+                    continue
+                k, v = line.split(":", 1)
+                v = v.strip()
+                if not v:
+                    continue
+                if k == "ipv4.method":
+                    details["method"] = v
+                elif k.startswith("IP4.GATEWAY"):
+                    details["gateway"] = v
+                elif k.startswith("IP4.DNS") and "dns" not in details:
+                    details["dns"] = v
+        except Exception:
+            pass
+        return details
 
     def apply(self, cfg: NetworkConfig) -> Dict[str, object]:
         """Apply hostname + DHCP or Static IP using `hostnamectl` and `nmcli`."""
@@ -40,6 +129,12 @@ class NetworkManager:
         try:
             subprocess.run(
                 ["hostnamectl", "set-hostname", cfg.hostname],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            subprocess.run(
+                ["systemctl", "restart", "avahi-daemon"],
                 capture_output=True,
                 text=True,
                 timeout=5,

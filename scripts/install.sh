@@ -15,9 +15,9 @@ mkdir -p "$APP_DIR" /etc/hydrasound
 apt-get update
 apt-get install -y \
   python3 python3-venv python3-pip \
-  alsa-utils avahi-daemon network-manager \
+  alsa-utils libasound2-dev avahi-daemon libnss-mdns network-manager \
   shairport-sync gmediarender gstreamer1.0-alsa gstreamer1.0-plugins-good \
-  curl git build-essential pkg-config
+  curl git build-essential pkg-config cargo rustc
 
 # Let Hydra Sound orchestrator manage shairport-sync & gmediarender
 systemctl disable --now shairport-sync gmediarender || true
@@ -28,9 +28,15 @@ if ! grep -q "^snd-aloop" /etc/modules; then
 fi
 modprobe snd-aloop || true
 
-# Set mDNS hostname to hydrasound.local
+# Set mDNS hostname to hydrasound.local and restart Avahi so it broadcasts immediately
 hostnamectl set-hostname hydrasound
-systemctl enable --now avahi-daemon
+if grep -q "^127\.0\.1\.1" /etc/hosts; then
+  sed -i "s/^127\.0\.1\.1.*/127.0.1.1\thydrasound/" /etc/hosts
+else
+  echo -e "127.0.1.1\thydrasound" >> /etc/hosts
+fi
+systemctl enable avahi-daemon
+systemctl restart avahi-daemon
 
 # Copy application files (including .git for Web GUI release updates)
 cp -r backend frontend scripts systemd "$APP_DIR/"
@@ -55,6 +61,10 @@ if ! command -v camilladsp >/dev/null 2>&1; then
     curl -sSL "$CAMILLA_URL" | tar -xz -C /usr/local/bin camilladsp || true
   fi
 fi
+
+# Install Spotify Connect (librespot) & Qobuz Connect (pibuz)
+bash "$APP_DIR/scripts/modules/update_librespot.sh" || true
+bash "$APP_DIR/scripts/modules/update_pibuz.sh" || true
 
 # Install systemd service
 cp "$APP_DIR/systemd/hydrasound.service" /etc/systemd/system/hydrasound.service
