@@ -6,6 +6,7 @@ from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from app.audio.alsa import get_device_capabilities, list_audio_devices
@@ -288,6 +289,18 @@ async def clear_system_logs(request: Request) -> dict:
     if handler:
         handler.clear()
     return {"ok": True}
+
+
+@router.get("/system/logs/download")
+async def download_system_logs(request: Request) -> PlainTextResponse:
+    handler = getattr(request.app.state, "log_handler", None)
+    lines = handler.get_lines() if handler else []
+    content = "\n".join(lines) + ("\n" if lines else "")
+    return PlainTextResponse(
+        content=content,
+        media_type="text/plain",
+        headers={"Content-Disposition": 'attachment; filename="hydrasound.log"'},
+    )
 
 
 @router.put("/config/system")
