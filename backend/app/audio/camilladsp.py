@@ -100,9 +100,16 @@ def build_camilladsp_config(
     filters = {}
     pipeline = []
 
-    if volume_cfg.mode == "software" or (
-        volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed
-    ):
+    if volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed:
+        filters["safety_mute"] = {
+            "type": "Gain",
+            "parameters": {
+                "gain": -80.0,
+                "mute": True,
+            },
+        }
+        pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["safety_mute"]})
+    elif volume_cfg.mode == "software":
         filters["master_volume"] = {
             "type": "Volume",
             "parameters": {

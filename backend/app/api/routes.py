@@ -110,7 +110,10 @@ async def get_audio_capabilities(device_id: str) -> dict:
 async def update_audio_config(payload: AudioOutputConfig, request: Request) -> dict:
     state = request.app.state
     cfg: HydraConfig = state.config_store.get()
-    device_changed = cfg.audio.device_id != payload.device_id
+    device_changed = (
+        cfg.audio.device_id != payload.device_id
+        or cfg.audio.device_name != payload.device_name
+    )
     cfg.audio = payload
     if device_changed:
         cfg.volume.usb_disabled_confirmed = False
