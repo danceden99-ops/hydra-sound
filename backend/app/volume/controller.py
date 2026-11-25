@@ -8,7 +8,7 @@ import math
 import subprocess
 from typing import Callable, Optional
 
-from app.audio.alsa import is_usb_audio_device
+from app.audio.alsa import is_usb_audio_device, list_mixers
 from app.audio.camilladsp import CamillaDSPManager
 from app.config import AudioOutputConfig, VolumeConfig
 
@@ -137,6 +137,18 @@ class VolumeController:
         if ":" in device_id:
             card = device_id.split(":", 1)[1].split(",", 1)[0]
         mixer = vol_cfg.hardware_mixer_name or "PCM"
+        try:
+            available = list_mixers(int(card))
+            if available and mixer not in available:
+                logger.info(
+                    "ALSA mixer '%s' not found on card %s; using '%s'.",
+                    mixer,
+                    card,
+                    available[0],
+                )
+                mixer = available[0]
+        except Exception:
+            pass
         safe_level = self.clamp_volume(vol_cfg.current_volume, vol_cfg)
         target = "0%" if vol_cfg.muted else f"{safe_level}%"
         try:
