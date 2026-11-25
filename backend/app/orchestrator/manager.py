@@ -201,3 +201,16 @@ class StreamOrchestrator:
             self.renderers[self.stream.active_source].set_client_volume(
                 volume_percent, muted
             )
+
+    def get_renderers_status(self, cfg: HydraConfig) -> Dict[str, dict]:
+        result: Dict[str, dict] = {}
+        for rid, adapter in self.renderers.items():
+            enabled = adapter.is_enabled(cfg)
+            result[rid] = {
+                "display_name": adapter.meta.display_name,
+                "enabled": enabled,
+                "running": adapter.is_running(),
+                "status": adapter.connection_status if enabled else "disabled",
+                "detail": adapter.connection_detail if enabled else "Disabled",
+            }
+        return result

@@ -63,6 +63,8 @@ body {
   border: 1px solid var(--border);
 }
 .badge-accent { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+.badge-success { background: rgba(63, 185, 80, 0.15); color: var(--success); border-color: var(--success); }
+.badge-danger { background: rgba(248, 81, 73, 0.15); color: var(--danger); border-color: var(--danger); }
 
 .track-title { font-size: 1.25rem; font-weight: 600; }
 .track-artist { color: var(--muted); margin-bottom: 14px; }

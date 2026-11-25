@@ -76,6 +76,7 @@ async def get_status(request: Request) -> dict:
         "system": get_system_metrics(),
         "network": state.network_manager.get_status(cfg.network),
         "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume),
+        "renderers": state.orchestrator.get_renderers_status(cfg),
     }
 
 

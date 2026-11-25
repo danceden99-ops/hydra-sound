@@ -31,6 +31,8 @@ class RendererAdapter(ABC):
 
     def __init__(self) -> None:
         self._proc: Optional[subprocess.Popen] = None
+        self.connection_status: str = "stopped"  # stopped | advertising | connected | error
+        self.connection_detail: str = "Not running"
 
     @abstractmethod
     def is_enabled(self, cfg: HydraConfig) -> bool:
@@ -43,6 +45,8 @@ class RendererAdapter(ABC):
     def start(self, cfg: HydraConfig, alsa_device: str) -> bool:
         self.stop()
         if not self.is_enabled(cfg):
+            self.connection_status = "disabled"
+            self.connection_detail = "Disabled"
             return False
         cmd = self.build_command(cfg, alsa_device)
         try:
@@ -52,6 +56,8 @@ class RendererAdapter(ABC):
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            self.connection_status = "advertising"
+            self.connection_detail = "Discoverable on LAN"
             threading.Thread(
                 target=self._drain_stderr,
                 args=(self._proc,),
@@ -60,6 +66,8 @@ class RendererAdapter(ABC):
             logger.info("Started renderer %s on %s", self.meta.id, alsa_device)
             return True
         except FileNotFoundError:
+            self.connection_status = "not_installed"
+            self.connection_detail = f"{self.meta.binary_name} not installed"
             logger.warning(
                 "Binary '%s' not installed for %s; running in standby/mock mode.",
                 self.meta.binary_name,
@@ -74,9 +82,24 @@ class RendererAdapter(ABC):
             for line in proc.stderr:
                 clean = line.strip()
                 if clean:
+                    self._update_connection_state(clean)
                     logger.warning("[%s] %s", self.meta.id, clean)
         except Exception:
             pass
+
+    def _update_connection_state(self, line: str) -> None:
+        """Infer live login/pairing/error state from renderer output."""
+        low = line.lower()
+        if "authenticated as" in low or "lifecycle -> connected" in low or "taking over" in low:
+            self.connection_status = "connected"
+            self.connection_detail = "Connected & authenticated"
+        elif "serving /streamcore" in low or "ready for rendering" in low:
+            if self.connection_status != "connected":
+                self.connection_status = "advertising"
+                self.connection_detail = "Discoverable on LAN"
+        elif " error " in low and "mdns_sd::service_daemon" not in low:
+            self.connection_status = "error"
+            self.connection_detail = line[:120]
 
     def stop(self) -> None:
         if self._proc and self._proc.poll() is None:
@@ -86,6 +109,8 @@ class RendererAdapter(ABC):
             except subprocess.TimeoutExpired:
                 self._proc.kill()
         self._proc = None
+        self.connection_status = "stopped"
+        self.connection_detail = "Stopped"
 
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None

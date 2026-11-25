@@ -63,6 +63,28 @@ function updateLiveUI(data) {
   $("vol-slider").max = volume.max_volume;
   $("vol-slider").value = volume.current_volume;
   $("vol-value").textContent = volume.muted ? "MUTED" : `${volume.current_volume}%`;
+
+  const strip = $("renderer-status-strip");
+  if (strip && data.renderers) {
+    strip.innerHTML = "";
+    Object.entries(data.renderers).forEach(([id, r]) => {
+      if (!r.enabled) return;
+      const b = document.createElement("span");
+      const cls =
+        r.status === "connected" ? "badge badge-success" :
+        r.status === "error" ? "badge badge-danger" :
+        r.status === "advertising" ? "badge badge-accent" : "badge";
+      b.className = cls;
+      b.title = r.detail || "";
+      const label =
+        r.status === "connected" ? "Connected" :
+        r.status === "advertising" ? "Ready" :
+        r.status === "error" ? "Error" :
+        r.status === "not_installed" ? "Not Installed" : "Stopped";
+      b.textContent = `${r.display_name}: ${label}`;
+      strip.appendChild(b);
+    });
+  }
 }
 
 function connectWebSocket() {

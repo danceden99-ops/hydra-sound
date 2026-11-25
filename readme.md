@@ -56,7 +56,7 @@ Because Hydra Sound relies on open-source protocol implementations, please note 
 
 ## Quick Start (Raspberry Pi 4 / 5)
 
-1. Flash **Raspberry Pi OS Lite (64-bit)** (Debian Bookworm or newer) and boot your Pi.
+1. Flash **Raspberry Pi OS Lite (64-bit)** (Debian Bookworm or newer) and boot your Pi. *(Use the **Lite** image rather than Desktop so PipeWire/PulseAudio does not compete for exclusive bit-perfect ALSA access.)*
 2. *(Optional)* Enable SSH if you are running headless (either in Raspberry Pi Imager or via `sudo raspi-config` → **Interface Options** → **SSH**).
 3. Update Raspberry Pi OS packages to the latest versions and install `git`:
    ```bash
