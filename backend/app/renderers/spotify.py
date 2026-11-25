@@ -24,6 +24,16 @@ class SpotifyRenderer(RendererAdapter):
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         sc = cfg.renderers.spotify
+        # Raspberry Pi vc4-hdmi only accepts IEC958_SUBFRAME_LE on raw hw:X,Y;
+        # use plughw:X,Y for HDMI so ALSA wraps PCM into IEC958 frames.
+        target_device = alsa_device
+        if (
+            "hdmi" in cfg.audio.device_name.lower()
+            and alsa_device.startswith("hw:")
+            and not alsa_device.startswith("hw:Loopback")
+        ):
+            target_device = "plug" + alsa_device
+
         cmd = [
             "librespot",
             "--name",
@@ -31,15 +41,12 @@ class SpotifyRenderer(RendererAdapter):
             "--backend",
             "alsa",
             "--device",
-            alsa_device,
+            target_device,
             "--bitrate",
             str(sc.bitrate),
             "--onevent",
             "/opt/hydrasound/scripts/hooks/librespot_event.sh",
         ]
-        # Raspberry Pi vc4-hdmi rejects S16_LE on raw hw:X,Y; use S32 for HDMI
-        if "hdmi" in cfg.audio.device_name.lower() and not alsa_device.startswith("hw:Loopback"):
-            cmd.extend(["--format", "S32"])
         if cfg.volume.mode == "disabled":
             cmd.extend(["--volume-ctrl", "fixed", "--initial-volume", "100"])
         else:
