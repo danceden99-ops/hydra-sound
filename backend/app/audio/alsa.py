@@ -1,0 +1,168 @@
+"""ALSA device discovery, hardware mixer probing, and stream format inspection."""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional
+
+
+@dataclass
+class AudioDevice:
+    id: str
+    card: int
+    device: int
+    name: str
+    description: str
+    device_type: str  # "usb", "hdmi", "analog", "other"
+    mixers: List[str]
+
+
+@dataclass
+class ActiveAlsaFormat:
+    format: Optional[str] = None
+    rate: Optional[int] = None
+    channels: Optional[int] = None
+    bit_depth: Optional[int] = None
+
+
+_APLAY_LINE_RE = re.compile(
+    r"^card\s+(\d+):\s+([^\[]+)\[([^\]]+)\],\s+device\s+(\d+):\s+([^\[]+)\[([^\]]+)\]"
+)
+
+
+def _classify_device(card_id: str, card_name: str, dev_name: str) -> str:
+    combined = f"{card_id} {card_name} {dev_name}".lower()
+    if "hdmi" in combined or "vc4" in combined:
+        return "hdmi"
+    if "usb" in combined or "dac" in combined or "audio" in card_id.lower():
+        if "headphones" not in combined and "bcm2835" not in combined:
+            return "usb"
+    if "headphones" in combined or "bcm2835" in combined or "analog" in combined:
+        return "analog"
+    return "other"
+
+
+def list_mixers(card: int) -> List[str]:
+    """Return available simple ALSA mixer controls for a card."""
+    try:
+        res = subprocess.run(
+            ["amixer", "-c", str(card), "scontrols"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if res.returncode != 0:
+            return []
+        mixers: List[str] = []
+        for line in res.stdout.splitlines():
+            m = re.search(r"Simple mixer control '([^']+)'", line)
+            if m:
+                mixers.append(m.group(1))
+        return mixers
+    except Exception:
+        return []
+
+
+def list_audio_devices() -> List[AudioDevice]:
+    """Enumerate ALSA playback devices via `aplay -l`, excluding Loopback."""
+    try:
+        res = subprocess.run(
+            ["aplay", "-l"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode != 0:
+            return _fallback_devices()
+    except Exception:
+        return _fallback_devices()
+
+    devices: List[AudioDevice] = []
+    for line in res.stdout.splitlines():
+        m = _APLAY_LINE_RE.match(line.strip())
+        if not m:
+            continue
+        card = int(m.group(1))
+        card_id = m.group(2).strip()
+        card_name = m.group(3).strip()
+        dev = int(m.group(4))
+        dev_name = m.group(6).strip()
+
+        if "loopback" in card_id.lower() or "loopback" in card_name.lower():
+            continue
+
+        devices.append(
+            AudioDevice(
+                id=f"hw:{card},{dev}",
+                card=card,
+                device=dev,
+                name=card_name,
+                description=f"{card_name} — {dev_name} (hw:{card},{dev})",
+                device_type=_classify_device(card_id, card_name, dev_name),
+                mixers=list_mixers(card),
+            )
+        )
+    return devices or _fallback_devices()
+
+
+def _fallback_devices() -> List[AudioDevice]:
+    """Fallback list when running outside a Linux ALSA host (e.g. dev/test)."""
+    return [
+        AudioDevice(
+            id="hw:0,0",
+            card=0,
+            device=0,
+            name="Default ALSA Device",
+            description="Default ALSA Device (hw:0,0)",
+            device_type="other",
+            mixers=["PCM"],
+        )
+    ]
+
+
+def probe_active_hw_params(device_id: str) -> ActiveAlsaFormat:
+    """Read `/proc/asound/cardX/pcmYp/sub0/hw_params` for live outgoing format."""
+    m = re.match(r"^(?:hw|plughw):(\d+),(\d+)$", device_id)
+    if not m:
+        return ActiveAlsaFormat()
+    card, dev = m.group(1), m.group(2)
+    hw_params = Path(f"/proc/asound/card{card}/pcm{dev}p/sub0/hw_params")
+    if not hw_params.exists():
+        return ActiveAlsaFormat()
+    try:
+        content = hw_params.read_text(encoding="utf-8")
+        if "closed" in content:
+            return ActiveAlsaFormat()
+        fmt = None
+        rate = None
+        channels = None
+        for line in content.splitlines():
+            if line.startswith("format:"):
+                fmt = line.split(":", 1)[1].strip()
+            elif line.startswith("rate:"):
+                rate_str = line.split(":", 1)[1].strip().split()[0]
+                rate = int(rate_str)
+            elif line.startswith("channels:"):
+                channels = int(line.split(":", 1)[1].strip())
+        bit_depth = _format_to_bits(fmt)
+        return ActiveAlsaFormat(
+            format=fmt, rate=rate, channels=channels, bit_depth=bit_depth
+        )
+    except Exception:
+        return ActiveAlsaFormat()
+
+
+def _format_to_bits(fmt: Optional[str]) -> Optional[int]:
+    if not fmt:
+        return None
+    for bits in (32, 24, 16):
+        if str(bits) in fmt:
+            return bits
+    if "FLOAT_LE" in fmt:
+        return 32
+    if "DSD" in fmt:
+        return 1
+    return None

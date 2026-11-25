@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hydra Sound — Audiophile Renderer</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo-dot"></span>
+      <h1>Hydra Sound</h1>
+      <span id="pipeline-badge" class="badge badge-accent">BIT-PERFECT</span>
+    </div>
+    <div class="telemetry">
+      <span>CPU: <strong id="cpu-load">--%</strong></span>
+      <span>Temp: <strong id="cpu-temp">--°C</strong></span>
+      <span id="net-host">hydrasound.local</span>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Now Playing & Stream Status -->
+    <section class="card now-playing">
+      <div class="card-header">
+        <h2>Now Playing</h2>
+        <div class="row-actions">
+          <span id="stream-source" class="badge">IDLE</span>
+          <button id="btn-release-lock" class="btn btn-sm btn-outline" hidden>Release Lock</button>
+        </div>
+      </div>
+      <div class="track-info">
+        <div class="track-title" id="track-title">Waiting for stream…</div>
+        <div class="track-artist" id="track-artist">Discoverable on LAN</div>
+      </div>
+      <div class="signal-path">
+        <div class="signal-box">
+          <span class="label">Incoming Stream</span>
+          <strong id="incoming-format">—</strong>
+        </div>
+        <div class="signal-arrow">→</div>
+        <div class="signal-box">
+          <span class="label">Outgoing Hardware</span>
+          <strong id="outgoing-format">—</strong>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Volume Control -->
+    <section class="card" id="live-volume-card">
+      <div class="card-header">
+        <h2>Master Volume</h2>
+        <span id="vol-mode-badge" class="badge">DISABLED</span>
+      </div>
+      <div class="volume-bar">
+        <button id="btn-mute" class="btn btn-outline">Mute</button>
+        <input id="vol-slider" type="range" min="0" max="100" value="35" />
+        <strong id="vol-value">35%</strong>
+      </div>
+    </section>
+
+    <!-- Tabs -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="audio">Audio &amp; DSP</button>
+      <button class="tab" data-tab="volume">Volume Settings</button>
+      <button class="tab" data-tab="services">Services &amp; Updates</button>
+      <button class="tab" data-tab="ir">IR Remote</button>
+      <button class="tab" data-tab="network">Network</button>
+      <button class="tab" data-tab="system">System</button>
+    </nav>
+
+    <!-- Audio & DSP Tab -->
+    <section class="card tab-panel active" id="tab-audio">
+      <h2>Audio Output &amp; Resampling</h2>
+      <div class="form-grid">
+        <label>
+          Output Device (USB DAC / HDMI / Built-in)
+          <select id="audio-device"></select>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="resample-enabled" />
+          <span>Enable Resampling (Disables Bit-Perfect Bypass)</span>
+        </label>
+        <label>
+          Target Sample Rate (Hz)
+          <select id="resample-rate">
+            <option value="44100">44,100 Hz</option>
+            <option value="48000">48,000 Hz</option>
+            <option value="88200">88,200 Hz</option>
+            <option value="96000">96,000 Hz</option>
+            <option value="176400">176,400 Hz</option>
+            <option value="192000">192,000 Hz</option>
+            <option value="384000">384,000 Hz</option>
+          </select>
+        </label>
+        <label>
+          Target Bit Depth
+          <select id="resample-bits">
+            <option value="16">16-bit</option>
+            <option value="24">24-bit</option>
+            <option value="32">32-bit</option>
+          </select>
+        </label>
+        <label>
+          Resampling Algorithm
+          <select id="resample-algo">
+            <option value="SincVeryHigh">Sinc Very High (Audiophile / SoX VHQ)</option>
+            <option value="SincHigh">Sinc High</option>
+            <option value="SincMedium">Sinc Medium</option>
+            <option value="SincFast">Sinc Fast</option>
+          </select>
+        </label>
+      </div>
+      <button class="btn btn-primary" id="save-audio">Apply Audio Settings</button>
+    </section>
+
+    <!-- Volume Settings Tab -->
+    <section class="card tab-panel" id="tab-volume">
+      <h2>Volume Control Configuration</h2>
+      <div class="form-grid">
+        <label>
+          Volume Control Mode
+          <select id="vol-mode">
+            <option value="disabled">Disabled (Downstream Preamp/DAC)</option>
+            <option value="hardware">Hardware (ALSA DAC/HDMI Mixer)</option>
+            <option value="software">Software (32-bit+ CamillaDSP Precision)</option>
+          </select>
+        </label>
+        <label>
+          Volume Curve
+          <select id="vol-curve">
+            <option value="logarithmic">Logarithmic (Perceptual)</option>
+            <option value="linear">Linear</option>
+          </select>
+        </label>
+        <label>
+          Power-On Volume (%)
+          <input type="number" id="vol-power-on" min="0" max="100" />
+        </label>
+        <label>
+          Maximum Volume Limit (%)
+          <input type="number" id="vol-max" min="1" max="100" />
+        </label>
+        <label>
+          IR / Step Size (%)
+          <input type="number" id="vol-step" min="1" max="20" />
+        </label>
+        <label>
+          Hardware Mixer Name
+          <input type="text" id="vol-hw-mixer" placeholder="PCM" />
+        </label>
+      </div>
+      <button class="btn btn-primary" id="save-volume">Save Volume Settings</button>
+    </section>
+
+    <!-- Services & Updates Tab -->
+    <section class="card tab-panel" id="tab-services">
+      <div class="card-header">
+        <h2>Streaming Services &amp; Module Updates</h2>
+        <button class="btn btn-sm btn-outline" id="btn-check-updates">Check Upstream Updates</button>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          Advertised Device Name (Spotify / Qobuz / AirPlay / DLNA / Cast)
+          <input type="text" id="renderer-device-name" placeholder="Hydra Sound" />
+        </label>
+        <label>
+          Pause Lock Timeout (seconds before releasing stream)
+          <input type="number" id="pause-timeout" min="5" max="3600" />
+        </label>
+      </div>
+
+      <div class="service-list">
+        <div class="service-item">
+          <label class="checkbox-row">
+            <input type="checkbox" id="sp-enabled" />
+            <strong>Spotify Connect (librespot)</strong>
+          </label>
+          <p class="hint">Requires Spotify Premium. Capped at 320 kbps Ogg Vorbis (PlayPlay DRM prevents lossless).</p>
+          <div class="form-grid compact">
+            <label>Auth Mode
+              <select id="sp-auth">
+                <option value="zeroconf">Zeroconf (LAN Discovery)</option>
+                <option value="credentials">Username &amp; Password</option>
+              </select>
+            </label>
+            <label>Username <input type="text" id="sp-user" /></label>
+            <label>Password <input type="password" id="sp-pass" /></label>
+          </div>
+        </div>
+
+        <div class="service-item">
+          <label class="checkbox-row">
+            <input type="checkbox" id="qb-enabled" />
+            <strong>Qobuz Connect (pibuz)</strong>
+          </label>
+          <p class="hint">Bit-perfect Hi-Res FLAC up to 24-bit/192 kHz. Requires Qobuz subscription.</p>
+          <div class="form-grid compact">
+            <label>Qobuz Email <input type="email" id="qb-email" /></label>
+            <label>Password <input type="password" id="qb-pass" /></label>
+          </div>
+        </div>
+
+        <div class="service-item">
+          <label class="checkbox-row">
+            <input type="checkbox" id="ap-enabled" />
+            <strong>Apple AirPlay 1 (shairport-sync)</strong>
+          </label>
+          <p class="hint">Lossless 16-bit/44.1 kHz ALAC.</p>
+        </div>
+
+        <div class="service-item">
+          <label class="checkbox-row">
+            <input type="checkbox" id="dlna-enabled" />
+            <strong>DLNA / UPnP (gmrender-resurrect)</strong>
+          </label>
+          <p class="hint">Bit-perfect Hi-Res PCM/FLAC.</p>
+        </div>
+
+        <div class="service-item">
+          <label class="checkbox-row">
+            <input type="checkbox" id="gc-enabled" />
+            <strong>Google Cast (shanocast — Experimental, Disabled by Default)</strong>
+          </label>
+          <p class="hint">Due to proprietary Google DRM certificates, native mobile apps may fail; best-effort for desktop Chrome.</p>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="save-services">Save Service Settings</button>
+
+      <h3>Installed Modules &amp; Upstream Releases</h3>
+      <div id="modules-list" class="modules-list">Click "Check Upstream Updates" to query GitHub releases.</div>
+    </section>
+
+    <!-- IR Remote Tab -->
+    <section class="card tab-panel" id="tab-ir">
+      <h2>Infrared (IR) Receiver</h2>
+      <div class="form-grid">
+        <label>
+          IR Receiver Mode
+          <select id="ir-mode">
+            <option value="disabled">Disabled</option>
+            <option value="flirc">FLIRC USB Receiver</option>
+            <option value="gpio">Raspberry Pi GPIO IR Receiver</option>
+          </select>
+        </label>
+        <label>
+          GPIO Pin (BCM)
+          <input type="number" id="ir-gpio-pin" min="2" max="27" />
+        </label>
+      </div>
+      <button class="btn btn-primary" id="save-ir">Save IR Settings</button>
+
+      <div class="flirc-box">
+        <h3>FLIRC USB IR Learning</h3>
+        <p id="flirc-status" class="hint">Status: checking…</p>
+        <div class="row-actions">
+          <button class="btn btn-outline" data-learn="vol_up">Learn Volume +</button>
+          <button class="btn btn-outline" data-learn="vol_down">Learn Volume -</button>
+          <button class="btn btn-outline" data-learn="mute">Learn Mute</button>
+          <button class="btn btn-danger" id="flirc-clear">Clear FLIRC</button>
+        </div>
+        <p id="flirc-learn-msg" class="hint"></p>
+      </div>
+    </section>
+
+    <!-- Network Tab -->
+    <section class="card tab-panel" id="tab-network">
+      <h2>Network Configuration</h2>
+      <div class="form-grid">
+        <label>
+          Hostname (mDNS: &lt;hostname&gt;.local)
+          <input type="text" id="net-hostname" />
+        </label>
+        <label>
+          Interface
+          <select id="net-iface">
+            <option value="eth0">eth0 (Ethernet)</option>
+            <option value="wlan0">wlan0 (Wi-Fi)</option>
+          </select>
+        </label>
+        <label>
+          IP Addressing Mode
+          <select id="net-mode">
+            <option value="dhcp">DHCP (Automatic)</option>
+            <option value="static">Static IP</option>
+          </select>
+        </label>
+        <label>Static IP Address <input type="text" id="net-ip" placeholder="192.168.1.50" /></label>
+        <label>Subnet CIDR <input type="text" id="net-mask" placeholder="24" /></label>
+        <label>Gateway <input type="text" id="net-gw" placeholder="192.168.1.1" /></label>
+        <label>DNS Servers <input type="text" id="net-dns" placeholder="1.1.1.1,8.8.8.8" /></label>
+      </div>
+      <button class="btn btn-primary" id="save-network">Apply Network Settings</button>
+
+      <div class="flirc-box">
+        <div class="card-header">
+          <h3>Wi-Fi Network Settings</h3>
+          <button class="btn btn-sm btn-outline" id="btn-scan-wifi">Scan Wi-Fi</button>
+        </div>
+        <div class="form-grid">
+          <label>
+            Available Networks
+            <select id="wifi-scan-list">
+              <option value="">-- Click Scan Wi-Fi or enter SSID below --</option>
+            </select>
+          </label>
+          <label>
+            Wi-Fi SSID
+            <input type="text" id="wifi-ssid" placeholder="Network Name (SSID)" />
+          </label>
+          <label>
+            Wi-Fi Password
+            <input type="password" id="wifi-pass" placeholder="Wi-Fi Password" />
+          </label>
+        </div>
+        <button class="btn btn-primary" id="btn-connect-wifi">Save &amp; Connect Wi-Fi</button>
+        <p id="wifi-status-msg" class="hint"></p>
+      </div>
+    </section>
+
+    <!-- System Tab -->
+    <section class="card tab-panel" id="tab-system">
+      <h2>System Power &amp; Software Version</h2>
+      <div class="service-list">
+        <div class="service-item">
+          <strong>Hydra Sound Application Version</strong>
+          <div id="sys-version-info" class="hint">Loading version info…</div>
+          <div class="form-grid compact" style="margin-top: 12px;">
+            <label>
+              GitHub Repository (owner/repo)
+              <input type="text" id="sys-github-repo" placeholder="your-username/hydra-sound" />
+            </label>
+            <label>
+              Available GitHub Releases
+              <select id="sys-release-select">
+                <option value="">-- Click Check Releases --</option>
+              </select>
+            </label>
+          </div>
+          <div class="row-actions" style="margin-top: 10px;">
+            <button class="btn btn-outline" id="btn-save-repo">Save GitHub Repo</button>
+            <button class="btn btn-outline" id="btn-check-releases">Check GitHub Releases</button>
+            <button class="btn btn-primary" id="btn-install-release">Install Selected Release</button>
+          </div>
+          <p id="sys-release-msg" class="hint"></p>
+        </div>
+        <div class="service-item">
+          <strong>Power Control</strong>
+          <p class="hint">Safely reboot or shut down the Raspberry Pi.</p>
+          <div class="row-actions" style="margin-top: 10px;">
+            <button class="btn btn-outline" id="btn-reboot">Reboot Raspberry Pi</button>
+            <button class="btn btn-danger" id="btn-shutdown">Shutdown Raspberry Pi</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

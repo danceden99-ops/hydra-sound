@@ -1,0 +1,203 @@
+"""First-come-first-serve Stream Orchestrator.
+
+Enforces single active stream ownership:
+- Stop / disconnect immediately releases the lock.
+- Pause starts a configurable timeout; when expired, releases the lock.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from typing import Dict, Optional
+
+from app.audio.alsa import probe_active_hw_params
+from app.audio.pipeline import AudioPipelineManager
+from app.config import HydraConfig
+from app.renderers.airplay import AirPlayRenderer
+from app.renderers.base import RendererAdapter
+from app.renderers.dlna import DLNARenderer
+from app.renderers.googlecast import GoogleCastRenderer
+from app.renderers.qobuz import QobuzRenderer
+from app.renderers.spotify import SpotifyRenderer
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StreamInfo:
+    active_source: Optional[str] = None
+    state: str = "idle"  # "idle" | "playing" | "paused"
+    artist: str = ""
+    title: str = ""
+    album: str = ""
+    incoming_format: str = ""
+    incoming_rate: Optional[int] = None
+    incoming_bit_depth: Optional[int] = None
+    outgoing_format: str = ""
+    outgoing_rate: Optional[int] = None
+    outgoing_bit_depth: Optional[int] = None
+    pause_remaining_seconds: Optional[int] = None
+
+
+class StreamOrchestrator:
+    """Coordinates renderer lifecycles and first-come-first-serve stream locking."""
+
+    def __init__(self, pipeline: AudioPipelineManager) -> None:
+        self.pipeline = pipeline
+        self.renderers: Dict[str, RendererAdapter] = {
+            "spotify": SpotifyRenderer(),
+            "qobuz": QobuzRenderer(),
+            "airplay": AirPlayRenderer(),
+            "dlna": DLNARenderer(),
+            "googlecast": GoogleCastRenderer(),
+        }
+        self.stream = StreamInfo()
+        self._pause_task: Optional[asyncio.Task] = None
+        self._current_alsa_device: str = "hw:0,0"
+
+    def start_enabled_renderers(self, cfg: HydraConfig) -> None:
+        self._current_alsa_device = self.pipeline.apply(cfg.audio, cfg.volume)
+        for rid, renderer in self.renderers.items():
+            if renderer.is_enabled(cfg):
+                renderer.start(cfg, self._current_alsa_device)
+            else:
+                renderer.stop()
+                if self.stream.active_source == rid:
+                    self._release_lock()
+
+    def stop_all(self) -> None:
+        self._cancel_pause_timer()
+        for renderer in self.renderers.values():
+            renderer.stop()
+        self.pipeline.camilla.stop()
+        self._release_lock()
+
+    async def handle_renderer_event(
+        self,
+        source: str,
+        event: str,
+        cfg: HydraConfig,
+        artist: str = "",
+        title: str = "",
+        album: str = "",
+        incoming_format: str = "",
+        incoming_rate: Optional[int] = None,
+        incoming_bit_depth: Optional[int] = None,
+    ) -> dict:
+        """Process play/pause/stop/metadata events from renderer hook scripts."""
+        if source not in self.renderers:
+            return {"accepted": False, "reason": "unknown_source"}
+
+        # First-come-first-serve lock check
+        if (
+            self.stream.active_source is not None
+            and self.stream.active_source != source
+            and self.stream.state in ("playing", "paused")
+        ):
+            logger.info(
+                "Rejected stream request from %s; locked by %s (%s)",
+                source,
+                self.stream.active_source,
+                self.stream.state,
+            )
+            return {
+                "accepted": False,
+                "reason": "locked",
+                "active_source": self.stream.active_source,
+            }
+
+        if event in ("play", "playing", "start", "metadata"):
+            self._cancel_pause_timer()
+            self.stream.active_source = source
+            self.stream.state = "playing"
+            if artist:
+                self.stream.artist = artist
+            if title:
+                self.stream.title = title
+            if album:
+                self.stream.album = album
+            if incoming_format:
+                self.stream.incoming_format = incoming_format
+            if incoming_rate:
+                self.stream.incoming_rate = incoming_rate
+            if incoming_bit_depth:
+                self.stream.incoming_bit_depth = incoming_bit_depth
+            self.refresh_outgoing_format(cfg)
+            return {"accepted": True, "state": "playing", "active_source": source}
+
+        if event == "pause" and self.stream.active_source == source:
+            self.stream.state = "paused"
+            self._start_pause_timer(cfg.renderers.pause_timeout_seconds, cfg)
+            return {"accepted": True, "state": "paused", "active_source": source}
+
+        if event in ("stop", "stopped", "disconnect") and self.stream.active_source == source:
+            self._cancel_pause_timer()
+            self._release_lock()
+            return {"accepted": True, "state": "idle", "active_source": None}
+
+        return {"accepted": True, "state": self.stream.state}
+
+    def force_release_lock(self, cfg: HydraConfig) -> None:
+        """Manually release lock (e.g. from Web GUI) and restart that renderer cleanly."""
+        prev = self.stream.active_source
+        self._cancel_pause_timer()
+        self._release_lock()
+        if prev and prev in self.renderers and self.renderers[prev].is_enabled(cfg):
+            self.renderers[prev].start(cfg, self._current_alsa_device)
+
+    def _release_lock(self) -> None:
+        self.stream = StreamInfo()
+
+    def _cancel_pause_timer(self) -> None:
+        if self._pause_task and not self._pause_task.done():
+            self._pause_task.cancel()
+        self._pause_task = None
+        self.stream.pause_remaining_seconds = None
+
+    def _start_pause_timer(self, timeout_seconds: int, cfg: HydraConfig) -> None:
+        self._cancel_pause_timer()
+
+        async def _countdown() -> None:
+            remaining = timeout_seconds
+            while remaining > 0:
+                self.stream.pause_remaining_seconds = remaining
+                await asyncio.sleep(1)
+                remaining -= 1
+            logger.info(
+                "Pause timeout (%ss) expired for %s; releasing stream lock.",
+                timeout_seconds,
+                self.stream.active_source,
+            )
+            prev = self.stream.active_source
+            self._release_lock()
+            if prev and prev in self.renderers and self.renderers[prev].is_enabled(cfg):
+                self.renderers[prev].start(cfg, self._current_alsa_device)
+
+        try:
+            loop = asyncio.get_running_loop()
+            self._pause_task = loop.create_task(_countdown())
+        except RuntimeError:
+            pass
+
+    def refresh_outgoing_format(self, cfg: HydraConfig) -> None:
+        hw = probe_active_hw_params(cfg.audio.device_id)
+        if hw.rate:
+            self.stream.outgoing_rate = hw.rate
+            self.stream.outgoing_bit_depth = hw.bit_depth
+            self.stream.outgoing_format = hw.format or ""
+        elif cfg.audio.resample_enabled:
+            self.stream.outgoing_rate = cfg.audio.resample_rate
+            self.stream.outgoing_bit_depth = cfg.audio.resample_bit_depth
+            self.stream.outgoing_format = f"S{cfg.audio.resample_bit_depth}_LE"
+        else:
+            self.stream.outgoing_rate = self.stream.incoming_rate
+            self.stream.outgoing_bit_depth = self.stream.incoming_bit_depth
+            self.stream.outgoing_format = self.stream.incoming_format
+
+    def push_volume_to_active_client(self, volume_percent: int, muted: bool) -> None:
+        if self.stream.active_source and self.stream.active_source in self.renderers:
+            self.renderers[self.stream.active_source].set_client_volume(
+                volume_percent, muted
+            )

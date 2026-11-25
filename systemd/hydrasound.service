@@ -1,0 +1,15 @@
+[Unit]
+Description=Hydra Sound Audiophile Network Renderer & Web GUI
+After=network-online.target sound.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hydrasound/backend
+Environment=HYDRA_CONFIG_PATH=/etc/hydrasound/config.json
+ExecStart=/opt/hydrasound/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
