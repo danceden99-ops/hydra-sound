@@ -99,6 +99,21 @@ pytest backend/tests -v
 
 ---
 
+## Acknowledgments & Open-Source Credits
+
+Hydra Sound would not be possible without the extraordinary work of the open-source audio community. We extend our sincere gratitude to the authors, maintainers, and contributors of the core streaming and DSP projects that power Hydra Sound:
+
+- **[librespot](https://github.com/librespot-org/librespot)** (`librespot-org/librespot`) — Open-source Spotify Connect client library.
+- **[pibuz](https://github.com/PhilipVinc/pibuz)** (`PhilipVinc/pibuz`) — Bit-perfect Qobuz Connect headless receiver.
+- **[shairport-sync](https://github.com/mikebrady/shairport-sync)** (`mikebrady/shairport-sync`) — High-precision Apple AirPlay audio player.
+- **[gmrender-resurrect](https://github.com/hzeller/gmrender-resurrect)** (`hzeller/gmrender-resurrect`) — Lightweight DLNA / UPnP media renderer.
+- **[shanocast](https://github.com/rgerganov/shanocast)** (`rgerganov/shanocast`) — Open-source Google Cast receiver implementation.
+- **[CamillaDSP](https://github.com/HEnquist/camilladsp)** (`HEnquist/camilladsp`) — High-precision 64-bit floating-point DSP and resampling engine.
+
+Thank you to everyone who dedicates their time to building and maintaining these open-source tools for the audiophile and Linux communities.
+
+---
+
 ## License
 
 Released under the [MIT License](LICENSE).
