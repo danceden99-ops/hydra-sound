@@ -90,6 +90,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Hydra Sound", version="1.0.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _no_cache_frontend(request, call_next):
+    response = await call_next(request)
+    if request.url.path in ("/", "/index.html", "/app.js", "/styles.css"):
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
+
+
 app.include_router(router)
 
 
