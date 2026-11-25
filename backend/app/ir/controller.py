@@ -32,16 +32,29 @@ class IRManager:
     def get_flirc_status(self) -> Dict[str, object]:
         try:
             res = subprocess.run(
-                ["flirc_util", "status"],
+                ["flirc_util", "settings"],
                 capture_output=True,
                 text=True,
                 timeout=3,
             )
-            connected = res.returncode == 0 and "device" in res.stdout.lower()
+            out = (res.stdout or res.stderr).strip()
+            if "could not find command" in out.lower():
+                res = subprocess.run(
+                    ["flirc_util", "version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                out = (res.stdout or res.stderr).strip()
+            connected = (
+                res.returncode == 0
+                and "disconnected" not in out.lower()
+                and bool(out)
+            )
             return {
                 "installed": True,
                 "connected": connected,
-                "raw": (res.stdout or res.stderr).strip(),
+                "raw": out,
                 "learning": self._learning_action,
             }
         except FileNotFoundError:
