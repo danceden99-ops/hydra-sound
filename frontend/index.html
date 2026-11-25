@@ -200,8 +200,14 @@
             <input type="checkbox" id="qb-enabled" />
             <strong>Qobuz Connect (pibuz)</strong>
           </label>
-          <p class="hint">Bit-perfect Hi-Res FLAC up to 24-bit/192 kHz. Requires Qobuz subscription.</p>
+          <p class="hint">Bit-perfect Hi-Res FLAC up to 24-bit/192 kHz. Requires Qobuz subscription (Zeroconf recommended so credentials are not stored).</p>
           <div class="form-grid compact">
+            <label>Auth Mode
+              <select id="qb-auth">
+                <option value="zeroconf">Zeroconf (LAN Discovery)</option>
+                <option value="credentials">Email &amp; Password</option>
+              </select>
+            </label>
             <label>Qobuz Email <input type="email" id="qb-email" /></label>
             <label>Password <input type="password" id="qb-pass" /></label>
           </div>

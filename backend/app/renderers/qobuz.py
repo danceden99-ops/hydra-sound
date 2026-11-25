@@ -33,6 +33,6 @@ class QobuzRenderer(RendererAdapter):
             "--on-event",
             "/opt/hydrasound/scripts/hooks/pibuz_event.sh",
         ]
-        if qc.email and qc.password:
+        if qc.auth_mode == "credentials" and qc.email and qc.password:
             cmd.extend(["--email", qc.email, "--password", qc.password])
         return cmd

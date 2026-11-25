@@ -69,6 +69,7 @@ class SpotifyConfig(BaseModel):
 class QobuzConfig(BaseModel):
     enabled: bool = True
     device_name: str = "Hydra Sound"
+    auth_mode: Literal["zeroconf", "credentials"] = "zeroconf"
     email: str = ""
     password: str = ""
 

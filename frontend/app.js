@@ -126,6 +126,7 @@ async function loadInitialConfig() {
   $("sp-pass").value = cfg.renderers.spotify.password;
 
   $("qb-enabled").checked = cfg.renderers.qobuz.enabled;
+  $("qb-auth").value = cfg.renderers.qobuz.auth_mode || "zeroconf";
   $("qb-email").value = cfg.renderers.qobuz.email;
   $("qb-pass").value = cfg.renderers.qobuz.password;
 
@@ -228,6 +229,7 @@ $("save-services").addEventListener("click", async () => {
     qobuz: {
       enabled: $("qb-enabled").checked,
       device_name: devName,
+      auth_mode: $("qb-auth").value,
       email: $("qb-email").value,
       password: $("qb-pass").value,
     },
