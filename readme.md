@@ -70,7 +70,7 @@ Because Hydra Sound relies on open-source protocol implementations, please note 
    cd hydra-sound
    sudo bash scripts/install.sh
    ```
-   > **Note on Install Time & Package Size:** The initial install downloads a large number of system packages (including the Rust toolchain `rustc`/`cargo`, ALSA/GStreamer audio libraries, `shairport-sync`, and `gmediarender`) and compiles **Spotify Connect (`librespot`)** and **Qobuz Connect (`pibuz`)** from source, as neither publishes prebuilt ARM64 binaries. Expect `install.sh` to take **~10–15 minutes** on a Raspberry Pi 4 or 5—allow it to run to completion.
+   > **Prebuilt ARM64 Binaries:** `install.sh` installs system audio packages (`shairport-sync`, `gmediarender`, `camilladsp`) and downloads prebuilt ARM64 binaries for **Spotify Connect (`librespot`)** and **Qobuz Connect (`pibuz`)** from GitHub Releases (compiled in the cloud via GitHub Actions), so setup typically completes in **~1–2 minutes** without compiling Rust on the Raspberry Pi.
 5. Open the Web GUI from any device on your LAN:
    ```text
    http://hydrasound.local:8000
