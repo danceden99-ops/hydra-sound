@@ -24,15 +24,17 @@ class SpotifyRenderer(RendererAdapter):
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         sc = cfg.renderers.spotify
-        # Raspberry Pi vc4-hdmi only accepts IEC958_SUBFRAME_LE on raw hw:X,Y;
-        # use plughw:X,Y for HDMI so ALSA wraps PCM into IEC958 frames.
+        # Raspberry Pi vc4-hdmi requires IEC958 framing and channel-status bits;
+        # use ALSA's `hdmi:CARD=X,DEV=Y` device for HDMI outputs.
         target_device = alsa_device
         if (
             "hdmi" in cfg.audio.device_name.lower()
             and alsa_device.startswith("hw:")
             and not alsa_device.startswith("hw:Loopback")
         ):
-            target_device = "plug" + alsa_device
+            card_dev = alsa_device.split(":", 1)[1].split(",")
+            if len(card_dev) == 2:
+                target_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
 
         cmd = [
             "librespot",
