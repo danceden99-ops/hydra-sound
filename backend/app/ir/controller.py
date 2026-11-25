@@ -94,6 +94,7 @@ class IRManager:
     ) -> None:
         fds: Dict[int, Path] = {}
         active_mode: Optional[str] = None
+        last_action_ts: float = 0.0
 
         def _close_all() -> None:
             for fd in list(fds):
@@ -151,17 +152,21 @@ class IRManager:
                         _INPUT_EVENT_FMT, data, offset
                     )
                     offset += _INPUT_EVENT_SIZE
-                    if ev_type != _EV_KEY:
+                    if ev_type != _EV_KEY or value != 1:
+                        continue
+                    now = time.monotonic()
+                    if now - last_action_ts < 0.15:
                         continue
                     action: Optional[str] = None
-                    if code == _KEY_VOLUMEUP and value in (1, 2):
+                    if code == _KEY_VOLUMEUP:
                         action = "vol_up"
-                    elif code == _KEY_VOLUMEDOWN and value in (1, 2):
+                    elif code == _KEY_VOLUMEDOWN:
                         action = "vol_down"
-                    elif code == _KEY_MUTE and value == 1:
+                    elif code == _KEY_MUTE:
                         action = "mute"
                     if action:
-                        logger.info("IR key event received: %s", action)
+                        last_action_ts = now
+                        logger.info("IR key event (%s): code=%s -> %s", fds.get(fd), code, action)
                         asyncio.run_coroutine_threadsafe(on_action(action), loop)
 
         _close_all()
