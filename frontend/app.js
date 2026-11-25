@@ -242,10 +242,33 @@ $("btn-check-updates").addEventListener("click", async () => {
         ${m.update_available ? "Update Available" : "Reinstall / Update"}
       </button>
     `;
-    row.querySelector("button").addEventListener("click", async () => {
+    row.querySelector("button").addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget;
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Updating…";
+      const statusEl = $("modules-update-status");
+      const compileNote = (m.id === "spotify" || m.id === "qobuz")
+        ? " Compiling Rust source on Raspberry Pi can take 5–10 minutes; please wait."
+        : " Please wait…";
+      statusEl.textContent = `Updating ${m.display_name}…${compileNote}`;
       showToast(`Updating ${m.display_name}…`);
-      const res = await api(`/api/modules/${m.id}/update`, "POST");
-      showToast(res.ok ? `${m.display_name} updated` : `Update failed: ${res.error || "see logs"}`);
+      try {
+        const res = await api(`/api/modules/${m.id}/update`, "POST");
+        if (res.ok) {
+          statusEl.textContent = `${m.display_name} updated successfully! Refreshing versions…`;
+          showToast(`${m.display_name} updated`);
+          $("btn-check-updates").click();
+        } else {
+          statusEl.textContent = `${m.display_name} update failed: ${res.error || res.stderr || "see logs"}`;
+          showToast(`Update failed: ${m.display_name}`);
+        }
+      } catch (err) {
+        statusEl.textContent = `${m.display_name} update request timed out or lost connection (build may still be finishing on the Pi).`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+      }
     });
     list.appendChild(row);
   });
