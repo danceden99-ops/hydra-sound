@@ -234,8 +234,26 @@ class NetworkManager:
         except Exception:
             return []
 
-    def connect_wifi(self, ssid: str, password: str = "") -> Dict[str, object]:
+    def set_wifi_country(self, country_code: str) -> None:
+        """Set Wi-Fi regulatory domain and unblock rfkill on Raspberry Pi."""
+        cc = country_code.strip().upper()
+        if len(cc) != 2 or not cc.isalpha():
+            return
+        try:
+            subprocess.run(["rfkill", "unblock", "wifi"], capture_output=True, timeout=3)
+            subprocess.run(
+                ["raspi-config", "nonint", "do_wifi_country", cc],
+                capture_output=True,
+                timeout=5,
+            )
+            subprocess.run(["iw", "reg", "set", cc], capture_output=True, timeout=3)
+        except Exception:
+            pass
+
+    def connect_wifi(self, ssid: str, password: str = "", country: str = "") -> Dict[str, object]:
         """Connect `wlan0` to a Wi-Fi SSID using NetworkManager."""
+        if country:
+            self.set_wifi_country(country)
         if not ssid.strip():
             return {"ok": False, "error": "Wi-Fi SSID cannot be empty."}
         cmd = ["nmcli", "dev", "wifi", "connect", ssid.strip()]

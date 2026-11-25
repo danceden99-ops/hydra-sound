@@ -153,6 +153,7 @@ async function loadInitialConfig() {
   $("net-gw").value = cfg.network.gateway || latestNetStatus.gateway || "";
   $("net-dns").value = cfg.network.dns || latestNetStatus.dns || "";
   $("net-host").textContent = `${cfg.network.hostname}.local (${latestNetStatus.ip_address || "—"})`;
+  $("wifi-country").value = cfg.network.wifi_country || "US";
   $("wifi-ssid").value = cfg.network.wifi_ssid || "";
   $("wifi-pass").value = cfg.network.wifi_password || "";
   updateStaticIpFieldsState();
@@ -284,6 +285,7 @@ $("save-network").addEventListener("click", async () => {
     dns: $("net-dns").value,
     wifi_ssid: $("wifi-ssid").value,
     wifi_password: $("wifi-pass").value,
+    wifi_country: $("wifi-country").value.trim().toUpperCase() || "US",
   });
   showToast("Network configuration applied");
 });
@@ -316,6 +318,7 @@ $("btn-connect-wifi").addEventListener("click", async () => {
   const res = await api("/api/network/wifi/connect", "POST", {
     ssid,
     password: $("wifi-pass").value,
+    country: $("wifi-country").value.trim().toUpperCase() || "US",
   });
   $("wifi-status-msg").textContent = res.ok ? `Connected to ${ssid}` : (res.error || res.output || "Connection failed");
   showToast(res.ok ? `Connected to ${ssid}` : "Wi-Fi connection failed");

@@ -52,6 +52,7 @@ class FlircLearnRequest(BaseModel):
 class WiFiConnectRequest(BaseModel):
     ssid: str
     password: str = ""
+    country: str = "US"
 
 
 class SystemPowerRequest(BaseModel):
@@ -246,8 +247,11 @@ async def connect_wifi_network(payload: WiFiConnectRequest, request: Request) ->
     )
     cfg.network.wifi_ssid = payload.ssid
     cfg.network.wifi_password = password
+    cfg.network.wifi_country = (payload.country or "US").strip().upper()
     state.config_store.save(cfg)
-    return state.network_manager.connect_wifi(payload.ssid, password)
+    return state.network_manager.connect_wifi(
+        payload.ssid, password, country=cfg.network.wifi_country
+    )
 
 
 @router.get("/system/version")

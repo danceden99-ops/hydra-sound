@@ -54,6 +54,7 @@ class NetworkConfig(BaseModel):
     dns: str = "1.1.1.1,8.8.8.8"
     wifi_ssid: str = ""
     wifi_password: str = ""
+    wifi_country: str = "US"
 
 
 class SpotifyConfig(BaseModel):
