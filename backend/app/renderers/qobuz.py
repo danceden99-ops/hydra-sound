@@ -31,7 +31,7 @@ class QobuzRenderer(RendererAdapter):
         is_hdmi = "hdmi" in cfg.audio.device_name.lower()
         target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
 
-        alsa_plugin = "plughw" if is_loopback else "hw"
+        alsa_plugin = "plughw" if (is_loopback or is_hdmi) else "hw"
 
         # Apply device name & ALSA settings via pibuz settings CLI before running daemon
         for key, value in (

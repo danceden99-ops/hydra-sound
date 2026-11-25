@@ -58,7 +58,7 @@ def resolve_card_id(card: str) -> str:
 
 
 def format_named_alsa_device(alsa_device: str, is_hdmi: bool = False) -> str:
-    """Convert `hw:X,Y` to `hdmi:CARD=<id>,DEV=Y` or `hw:CARD=<id>,DEV=Y` for `aplay -L` enumeration."""
+    """Convert `hw:X,Y` to `plughw:CARD=<id>,DEV=Y` (HDMI) or `hw:CARD=<id>,DEV=Y` for `aplay -L` enumeration."""
     if "loopback" in alsa_device.lower() or not alsa_device.startswith("hw:"):
         return alsa_device
     parts = alsa_device.split(":", 1)[1].split(",")
@@ -66,7 +66,7 @@ def format_named_alsa_device(alsa_device: str, is_hdmi: bool = False) -> str:
         return alsa_device
     card_id = resolve_card_id(parts[0].strip())
     dev = parts[1].strip()
-    prefix = "hdmi" if is_hdmi else "hw"
+    prefix = "plughw" if is_hdmi else "hw"
     return f"{prefix}:CARD={card_id},DEV={dev}"
     return "other"
 
