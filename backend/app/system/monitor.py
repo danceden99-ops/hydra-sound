@@ -249,6 +249,11 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
             logger.error("Release install checkout failed: %s", err)
             return {"ok": False, "error": err}
 
+        # Ensure shell scripts remain executable after git checkout
+        for pattern in ("scripts/*.sh", "scripts/modules/*.sh", "scripts/hooks/*.sh"):
+            for sh_file in repo_root.glob(pattern):
+                sh_file.chmod(0o755)
+
         pip_bin = Path("/opt/hydrasound/venv/bin/pip")
         req_file = repo_root / "backend" / "requirements.txt"
         if pip_bin.exists() and req_file.exists():
