@@ -40,7 +40,7 @@ RESAMPLER_PROFILES = {
 def bit_depth_to_alsa_format(bit_depth: int) -> str:
     return {
         16: "S16_LE",
-        24: "S24_3LE",
+        24: "S24_3_LE",
         32: "S32_LE",
     }.get(bit_depth, "S32_LE")
 
