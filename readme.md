@@ -57,13 +57,19 @@ Because Hydra Sound relies on open-source protocol implementations, please note 
 ## Quick Start (Raspberry Pi 4 / 5)
 
 1. Flash **Raspberry Pi OS Lite (64-bit)** (Debian Bookworm or newer) and boot your Pi.
-2. Clone the repository and run the installer:
+2. *(Optional)* Enable SSH if you are running headless (either in Raspberry Pi Imager or via `sudo raspi-config` → **Interface Options** → **SSH**).
+3. Install `git` so you can clone the repository:
+   ```bash
+   sudo apt update
+   sudo apt install -y git
+   ```
+4. Clone the repository and run the installer:
    ```bash
    git clone https://github.com/danceden99-ops/hydra-sound.git
    cd hydra-sound
    sudo bash scripts/install.sh
    ```
-3. Open the Web GUI from any device on your LAN:
+5. Open the Web GUI from any device on your LAN:
    ```text
    http://hydrasound.local:8000
    ```
