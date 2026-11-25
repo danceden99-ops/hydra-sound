@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from typing import Optional
 
@@ -154,6 +155,10 @@ async def confirm_usb_disabled(request: Request) -> dict:
     cfg: HydraConfig = state.config_store.get()
     cfg.volume.usb_disabled_confirmed = True
     state.config_store.save(cfg)
+    logging.getLogger(__name__).info(
+        "USB DAC speaker protection confirmed by user; enabling 0 dB bit-perfect pass-through on %s.",
+        cfg.audio.device_id,
+    )
     state.orchestrator.start_enabled_renderers(cfg)
     await state.volume_controller.apply(cfg.audio, cfg.volume)
     return {
