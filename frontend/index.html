@@ -368,6 +368,17 @@
             <button class="btn btn-danger" id="btn-shutdown">Shutdown Raspberry Pi</button>
           </div>
         </div>
+        <div class="service-item">
+          <div class="card-header">
+            <strong>System Log File (Last 500 Entries)</strong>
+            <div class="row-actions">
+              <button class="btn btn-sm btn-outline" id="btn-refresh-logs">Refresh Logs</button>
+              <button class="btn btn-sm btn-danger" id="btn-clear-logs">Clear Logs</button>
+            </div>
+          </div>
+          <div id="sys-logs-meta" class="hint">Click "Refresh Logs" to view the latest entries.</div>
+          <pre id="sys-logs-output" class="hint" style="margin-top: 10px; max-height: 280px; overflow: auto; white-space: pre-wrap; background: var(--surface); padding: 10px; border-radius: 6px; border: 1px solid var(--border);"></pre>
+        </div>
       </div>
     </section>
   </main>

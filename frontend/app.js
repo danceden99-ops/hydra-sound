@@ -427,4 +427,20 @@ $("btn-shutdown").addEventListener("click", async () => {
   showToast("Shutting down Raspberry Pi…");
 });
 
+async function loadSystemLogs() {
+  const data = await api("/api/system/logs");
+  $("sys-logs-meta").textContent = `Showing ${data.count} / 500 entries (${data.path || "log file"})`;
+  const out = $("sys-logs-output");
+  out.textContent = data.lines.length ? data.lines.join("\n") : "(Log is empty)";
+  out.scrollTop = out.scrollHeight;
+}
+
+$("btn-refresh-logs").addEventListener("click", loadSystemLogs);
+
+$("btn-clear-logs").addEventListener("click", async () => {
+  await api("/api/system/logs/clear", "POST");
+  await loadSystemLogs();
+  showToast("System logs cleared");
+});
+
 loadInitialConfig().then(connectWebSocket);

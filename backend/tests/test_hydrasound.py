@@ -18,6 +18,7 @@ from app.audio.pipeline import LOOPBACK_PLAYBACK_DEVICE, AudioPipelineManager
 from app.config import AudioOutputConfig, HydraConfig, VolumeConfig
 from app.main import app
 from app.orchestrator.manager import StreamOrchestrator
+from app.system.logger import Rolling500FileHandler
 from app.volume.controller import VolumeController, percent_to_db
 
 
@@ -145,3 +146,27 @@ def test_api_defaults_and_googlecast_disabled(tmp_path: Path, monkeypatch) -> No
 
         bad_tag = client.post("/api/system/install-release", json={"tag": "v1.0.0; rm -rf /"})
         assert bad_tag.status_code == 400
+
+        logs_resp = client.get("/api/system/logs")
+        assert logs_resp.status_code == 200
+        assert "lines" in logs_resp.json()
+
+
+def test_rolling_500_log_handler(tmp_path: Path) -> None:
+    import logging
+
+    log_file = tmp_path / "hydrasound.log"
+    handler = Rolling500FileHandler(log_path=log_file, max_entries=500)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    test_logger = logging.getLogger("hydra_test_500")
+    test_logger.setLevel(logging.INFO)
+    test_logger.addHandler(handler)
+    try:
+        for i in range(600):
+            test_logger.info("entry-%d", i)
+        lines = log_file.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 500
+        assert lines[0] == "entry-100"
+        assert lines[-1] == "entry-599"
+    finally:
+        test_logger.removeHandler(handler)

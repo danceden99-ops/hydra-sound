@@ -18,6 +18,7 @@ from app.config import ConfigStore
 from app.ir.controller import IRManager
 from app.network.manager import NetworkManager
 from app.orchestrator.manager import StreamOrchestrator
+from app.system.logger import Rolling500FileHandler
 from app.system.monitor import get_system_metrics
 from app.volume.controller import VolumeController
 
@@ -29,6 +30,13 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_handler = Rolling500FileHandler(max_entries=500)
+    log_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
+    root_logger = logging.getLogger()
+    root_logger.addHandler(log_handler)
+
     config_store = ConfigStore()
     cfg = config_store.get()
 
@@ -43,6 +51,7 @@ async def lifespan(app: FastAPI):
     network_manager = NetworkManager()
 
     app.state.config_store = config_store
+    app.state.log_handler = log_handler
     app.state.camilla = camilla
     app.state.pipeline = pipeline
     app.state.orchestrator = orchestrator
@@ -57,6 +66,7 @@ async def lifespan(app: FastAPI):
     yield
 
     orchestrator.stop_all()
+    root_logger.removeHandler(log_handler)
 
 
 app = FastAPI(title="Hydra Sound", version="1.0.0", lifespan=lifespan)

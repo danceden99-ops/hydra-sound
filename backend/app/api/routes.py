@@ -269,6 +269,27 @@ async def get_system_version(request: Request) -> dict:
     )
 
 
+@router.get("/system/logs")
+async def get_system_logs(request: Request) -> dict:
+    handler = getattr(request.app.state, "log_handler", None)
+    if not handler:
+        return {"lines": [], "count": 0, "path": ""}
+    lines = handler.get_lines()
+    return {
+        "lines": lines,
+        "count": len(lines),
+        "path": str(handler.log_path),
+    }
+
+
+@router.post("/system/logs/clear")
+async def clear_system_logs(request: Request) -> dict:
+    handler = getattr(request.app.state, "log_handler", None)
+    if handler:
+        handler.clear()
+    return {"ok": True}
+
+
 @router.put("/config/system")
 async def update_system_config(payload: SystemConfig, request: Request) -> dict:
     state = request.app.state
