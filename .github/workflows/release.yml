@@ -1,0 +1,42 @@
+name: Build ARM64 Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ALSA build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config build-essential
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build librespot (Spotify Connect)
+        run: |
+          cargo install librespot --locked --no-default-features --features "alsa-backend,rustls-tls-native-roots" --root ./dist
+
+      - name: Build pibuz (Qobuz Connect)
+        run: |
+          cargo install --git https://github.com/PhilipVinc/pibuz --root ./dist
+
+      - name: Package ARM64 binaries
+        run: |
+          tar -czvf hydra-sound-arm64-binaries.tar.gz -C ./dist/bin librespot pibuz
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hydra-sound-arm64-binaries.tar.gz
+          generate_release_notes: true

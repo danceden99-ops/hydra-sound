@@ -17,7 +17,7 @@ apt-get install -y \
   python3 python3-venv python3-pip \
   alsa-utils libasound2-dev avahi-daemon libnss-mdns network-manager \
   shairport-sync gmediarender gstreamer1.0-alsa gstreamer1.0-plugins-good \
-  curl git build-essential pkg-config cargo rustc
+  curl git build-essential pkg-config
 
 # Let Hydra Sound orchestrator manage shairport-sync & gmediarender
 systemctl disable --now shairport-sync gmediarender || true
