@@ -178,8 +178,10 @@ metadata = {{
                                     val = base64.b64decode(raw_b64).decode("utf-8", errors="replace").strip()
                                 except Exception:
                                     pass
-                            # core: minm=6d696e6d (title), asar=61736172 (artist), asal=6173616c (album)
-                            if code == "6d696e6d":
+                            # core: mdst=6d647374 (start), minm=6d696e6d (title), asar=61736172 (artist), asal=6173616c (album)
+                            if code == "6d647374":
+                                cur = {"title": "", "artist": "", "album": ""}
+                            elif code == "6d696e6d":
                                 cur["title"] = val
                             elif code == "61736172":
                                 cur["artist"] = val

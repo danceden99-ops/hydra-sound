@@ -142,8 +142,11 @@ class StreamOrchestrator:
 
         if event in ("play", "playing", "start", "metadata"):
             self._cancel_pause_timer()
+            if self.stream.active_source != source:
+                self.stream = StreamInfo(active_source=source, state="playing")
+            elif event != "metadata":
+                self.stream.state = "playing"
             self.stream.active_source = source
-            self.stream.state = "playing"
             if artist:
                 self.stream.artist = artist
             if title:
