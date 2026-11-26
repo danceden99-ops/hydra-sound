@@ -292,6 +292,8 @@ class CamillaDSPManager:
             '    cpath "/usr/local/bin/camilladsp"\n'
             f'    config_in "{self.template_path}"\n'
             f'    config_out "{self.config_path}"\n'
+            "    channels 2\n"
+            "    rates = [ 44100 48000 88200 96000 176400 192000 352800 384000 ]\n"
             f'    cargs [ -p "{CAMILLA_WS_PORT}" -a "127.0.0.1" '
             f'-s "{self.statefile_path}" -o "/var/log/hydrasound-camilladsp.log" ]\n'
             "}\n"
