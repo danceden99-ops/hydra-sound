@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.audio.alsa import is_usb_audio_device
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
@@ -46,13 +47,17 @@ class SpotifyRenderer(RendererAdapter):
             target_device,
             "--bitrate",
             str(sc.bitrate),
+            "--volume-ctrl",
+            "fixed",
+            "--initial-volume",
+            "100",
             "--onevent",
             "/opt/hydrasound/scripts/hooks/librespot_event.sh",
         ]
-        if cfg.volume.mode == "disabled":
-            cmd.extend(["--volume-ctrl", "fixed", "--initial-volume", "100"])
-        else:
-            cmd.extend(["--initial-volume", str(cfg.volume.current_volume)])
+        if "loopback" in alsa_device.lower() or is_usb_audio_device(
+            alsa_device, cfg.audio.device_name
+        ):
+            cmd.extend(["--format", "S32", "--dither", "none"])
 
         if sc.auth_mode == "credentials" and sc.username and sc.password:
             cmd.extend(["--username", sc.username, "--password", sc.password])

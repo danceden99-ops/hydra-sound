@@ -29,4 +29,6 @@ class DLNARenderer(RendererAdapter):
             "alsasink",
             "--gstout-audiodevice",
             alsa_device,
+            "--gstout-initial-volume-db",
+            "0",
         ]

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -134,12 +135,22 @@ def list_audio_devices() -> List[AudioDevice]:
     return devices or _fallback_devices()
 
 
+_USB_CACHE: Dict[str, Tuple[float, bool]] = {}
+
+
 def is_usb_audio_device(device_id: str, device_name: str = "") -> bool:
-    """Return True if the selected ALSA output is a USB audio device."""
+    """Return True if the selected ALSA output is a USB audio device (cached 10s)."""
+    now = time.monotonic()
+    cached = _USB_CACHE.get(device_id)
+    if cached and now - cached[0] < 10.0:
+        return cached[1]
+    result = "usb" in device_name.lower()
     for dev in list_audio_devices():
         if dev.id == device_id:
-            return dev.device_type == "usb"
-    return "usb" in device_name.lower()
+            result = dev.device_type == "usb"
+            break
+    _USB_CACHE[device_id] = (now, result)
+    return result
 
 
 def _fallback_devices() -> List[AudioDevice]:

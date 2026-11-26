@@ -54,17 +54,16 @@ class AirPlayRenderer(RendererAdapter):
         conf_path = _get_shairport_conf_path()
         conf_path.parent.mkdir(parents=True, exist_ok=True)
         ap = cfg.renderers.airplay
-        ignore_vol = "yes" if cfg.volume.mode == "disabled" else "no"
         conf = f"""general = {{
   name = "{ap.device_name}";
   interpolation = "soxr";
   output_backend = "alsa";
-  ignore_volume_control = "{ignore_vol}";
+  ignore_volume_control = "yes";
 }};
 
 alsa = {{
   output_device = "{alsa_device}";
-  output_rate = "auto";
+  output_rate = 44100;
   output_format = "auto";
 }};
 

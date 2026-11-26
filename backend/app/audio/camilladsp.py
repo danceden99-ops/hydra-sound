@@ -69,9 +69,12 @@ def build_camilladsp_config(
         if len(card_dev) == 2:
             playback_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
 
+    chunksize = 1024 if target_rate <= 48000 else (2048 if target_rate <= 96000 else 4096)
+
     devices: dict = {
         "samplerate": target_rate,
-        "chunksize": 2048,
+        "chunksize": chunksize,
+        "enable_rate_adjust": True,
         "capture": {
             "type": "Alsa",
             "channels": 2,
@@ -90,7 +93,6 @@ def build_camilladsp_config(
         profile = RESAMPLER_PROFILES.get(
             audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
         )
-        devices["enable_rate_adjust"] = True
         devices["resampler"] = {
             "type": "AsyncSinc",
             "profile": profile["profile"],
@@ -142,8 +144,21 @@ class CamillaDSPManager:
         return self.config_path
 
     def start(self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig) -> None:
+        new_yaml = yaml.safe_dump(
+            build_camilladsp_config(audio_cfg, volume_cfg), sort_keys=False
+        )
+        if (
+            self.running
+            and self._proc
+            and self._proc.poll() is None
+            and self.config_path.exists()
+            and self.config_path.read_text(encoding="utf-8") == new_yaml
+        ):
+            return
+
         self.stop()
-        self.write_config(audio_cfg, volume_cfg)
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(new_yaml, encoding="utf-8")
         cmd = [
             "camilladsp",
             "-p",
