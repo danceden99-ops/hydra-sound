@@ -265,7 +265,7 @@ class SpotifyRenderer(RendererAdapter):
                 else str(artists)
             )
             bitrate = data.get("bitrate")
-            fmt = "FLAC" if bitrate is None else f"Ogg Vorbis ({bitrate} kbps)"
+            fmt = "Ogg Vorbis" if bitrate is None else f"Ogg Vorbis ({bitrate} kbps)"
             _post_internal_event(
                 {
                     "source": "spotify",

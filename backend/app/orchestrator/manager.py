@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Optional
 
 from app.audio.alsa import probe_active_hw_params
@@ -68,6 +68,7 @@ class StreamOrchestrator:
 
     def start_enabled_renderers(self, cfg: HydraConfig) -> None:
         self._current_alsa_device = self.pipeline.apply(cfg.audio, cfg.volume)
+        self._active_capture_rate = 44100
         for rid, renderer in self.renderers.items():
             if renderer.is_enabled(cfg):
                 renderer.start(cfg, self._current_alsa_device)

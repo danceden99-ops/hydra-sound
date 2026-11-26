@@ -70,6 +70,7 @@ fi
 # Install Spotify Connect (librespot) & Qobuz Connect (pibuz)
 bash "$APP_DIR/scripts/modules/update_librespot.sh" || true
 bash "$APP_DIR/scripts/modules/update_pibuz.sh" || true
+bash "$APP_DIR/scripts/modules/update_camilladsp.sh" || true
 
 # Install systemd service
 cp "$APP_DIR/systemd/hydrasound.service" /etc/systemd/system/hydrasound.service

@@ -13,13 +13,13 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.audio.camilladsp import CamillaDSPManager, build_camilladsp_config
-from app.audio.pipeline import LOOPBACK_PLAYBACK_DEVICE, AudioPipelineManager
-from app.config import AudioOutputConfig, HydraConfig, VolumeConfig
-from app.main import app
-from app.orchestrator.manager import StreamOrchestrator
-from app.system.logger import Rolling500FileHandler
-from app.volume.controller import VolumeController, percent_to_db
+from app.audio.camilladsp import CamillaDSPManager, build_camilladsp_config  # noqa: E402
+from app.audio.pipeline import LOOPBACK_PLAYBACK_DEVICE, AudioPipelineManager  # noqa: E402
+from app.config import AudioOutputConfig, HydraConfig, VolumeConfig  # noqa: E402
+from app.main import app  # noqa: E402
+from app.orchestrator.manager import StreamOrchestrator  # noqa: E402
+from app.system.logger import Rolling500FileHandler  # noqa: E402
+from app.volume.controller import VolumeController, percent_to_db  # noqa: E402
 
 
 def test_dynamic_bypass_bit_perfect_vs_dsp(tmp_path: Path) -> None:

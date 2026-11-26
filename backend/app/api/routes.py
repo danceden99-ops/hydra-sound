@@ -148,7 +148,8 @@ async def toggle_test_tone(request: Request) -> dict:
 
     if cfg.volume.mode != "disabled":
         cfg.volume.muted = False
-        await state.volume_controller.set_volume(50, cfg.audio, cfg.volume)
+        safe_vol = min(cfg.volume.current_volume, 50)
+        await state.volume_controller.set_volume(safe_vol, cfg.audio, cfg.volume)
         state.config_store.save(cfg)
 
     target = state.pipeline.get_renderer_alsa_device(cfg.audio, cfg.volume)
