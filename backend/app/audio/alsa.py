@@ -288,6 +288,58 @@ def _format_to_bits(fmt: Optional[str]) -> Optional[int]:
     return None
 
 
+_STANDARD_RATES = (44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000)
+
+
+def parse_playback_capabilities(hw_dump: str, usb_stream: str) -> dict:
+    """Extract structured supported rates, bit depths, and recommended settings."""
+    playback_stream = _extract_stream0_playback_section(usb_stream) if usb_stream else ""
+    combined = (playback_stream or "") + "\n" + (hw_dump or "")
+
+    bit_depths: List[int] = []
+    if "S16_LE" in combined:
+        bit_depths.append(16)
+    if any(tok in combined for tok in ("S24_3LE", "S24_3_LE", "S24_LE")):
+        bit_depths.append(24)
+    if "S32_LE" in combined or "FLOAT_LE" in combined:
+        bit_depths.append(32)
+
+    rates_set: set[int] = set()
+    for line in combined.splitlines():
+        s = line.strip()
+        if s.startswith("Rates:"):
+            for tok in re.findall(r"\d+", s):
+                val = int(tok)
+                if val in _STANDARD_RATES:
+                    rates_set.add(val)
+        elif s.startswith("RATE:"):
+            bracket = re.search(r"\[(\d+)\s+(\d+)\]", s)
+            if bracket:
+                lo, hi = int(bracket.group(1)), int(bracket.group(2))
+                for r in _STANDARD_RATES:
+                    if lo <= r <= hi:
+                        rates_set.add(r)
+            else:
+                for tok in re.findall(r"\d+", s):
+                    val = int(tok)
+                    if val in _STANDARD_RATES:
+                        rates_set.add(val)
+
+    supported_rates = sorted(rates_set)
+    rec_bits = max(bit_depths) if bit_depths else None
+    rec_rate = None
+    if supported_rates:
+        sweet_spot = [r for r in supported_rates if r <= 192000]
+        rec_rate = max(sweet_spot) if sweet_spot else max(supported_rates)
+
+    return {
+        "supported_rates": supported_rates,
+        "supported_bit_depths": bit_depths,
+        "recommended_rate": rec_rate,
+        "recommended_bit_depth": rec_bits,
+    }
+
+
 def get_device_capabilities(device_id: str) -> dict:
     """Inspect ALSA hardware capabilities (rates, formats, channels) for USB DAC / HDMI."""
     m = re.match(r"^(?:hw|plughw):(\d+),(\d+)$", device_id.strip())
@@ -320,10 +372,12 @@ def get_device_capabilities(device_id: str) -> dict:
     except Exception as exc:
         hw_dump = f"Unable to probe ALSA hw_params: {exc}"
 
+    structured = parse_playback_capabilities(hw_dump, usb_stream)
     return {
         "device_id": device_id,
         "hw_params": hw_dump or "No hardware parameters reported (device may be busy or unavailable).",
         "usb_stream": usb_stream,
+        **structured,
     }
 
 

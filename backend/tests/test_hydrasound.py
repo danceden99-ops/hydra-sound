@@ -403,6 +403,28 @@ async def test_alsa_cdsp_template_and_statefile_volume_limits(
     assert pipeline.get_renderer_alsa_device(audio, vol) == "camilladsp"
 
 
+def test_parse_playback_capabilities_xmos() -> None:
+    from app.audio.alsa import parse_playback_capabilities
+
+    xmos_stream0 = (
+        "Playback:\n"
+        "  Interface 1\n"
+        "    Altset 1\n"
+        "    Format: S32_LE\n"
+        "    Rates: 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000\n"
+        "  Interface 1\n"
+        "    Altset 2\n"
+        "    Format: S16_LE\n"
+        "    Rates: 44100, 48000, 88200, 96000, 176400, 192000\n"
+    )
+    caps = parse_playback_capabilities("", xmos_stream0)
+    assert caps["supported_bit_depths"] == [16, 32]
+    assert caps["recommended_bit_depth"] == 32
+    assert caps["recommended_rate"] == 192000
+    assert 96000 in caps["supported_rates"]
+
+
+
 
 
 

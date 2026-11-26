@@ -134,6 +134,60 @@ function updateStaticIpFieldsState() {
   }
 }
 
+function formatRateLabel(rate) {
+  return `${rate.toLocaleString()} Hz`;
+}
+
+async function refreshResampleCapabilities(deviceId) {
+  const hint = $("resample-recommendation");
+  const rateSel = $("resample-rate");
+  const bitsSel = $("resample-bits");
+  if (!deviceId || !rateSel || !bitsSel) return;
+
+  try {
+    const caps = await api(`/api/audio/capabilities?device_id=${encodeURIComponent(deviceId)}`);
+    const rates = caps.supported_rates || [];
+    const bits = caps.supported_bit_depths || [];
+    const recRate = caps.recommended_rate;
+    const recBits = caps.recommended_bit_depth;
+
+    Array.from(rateSel.options).forEach((opt) => {
+      const val = Number(opt.value);
+      const supported = rates.length === 0 || rates.includes(val);
+      opt.disabled = !supported;
+      let label = formatRateLabel(val);
+      if (!supported) label += " (Unsupported)";
+      else if (val === recRate) label += " ★ Recommended";
+      opt.textContent = label;
+    });
+
+    Array.from(bitsSel.options).forEach((opt) => {
+      const val = Number(opt.value);
+      const supported = bits.length === 0 || bits.includes(val);
+      opt.disabled = !supported;
+      let label = `${val}-bit`;
+      if (!supported) label += " (Unsupported)";
+      else if (val === recBits) label += " ★ Recommended";
+      opt.textContent = label;
+    });
+
+    if (hint) {
+      if (rates.length > 0 || bits.length > 0) {
+        const bText = bits.length ? bits.map((b) => `${b}-bit`).join(", ") : "Unknown";
+        const rMax = rates.length ? formatRateLabel(Math.max(...rates)) : "Unknown";
+        const recText = [recBits ? `${recBits}-bit` : null, recRate ? formatRateLabel(recRate) : null]
+          .filter(Boolean)
+          .join(" / ");
+        hint.textContent = `Detected DAC Playback: ${bText} (up to ${rMax}). Highest-quality choice: ${recText}.`;
+      } else {
+        hint.textContent = "Could not probe DAC capabilities while idle/busy; all standard rates shown.";
+      }
+    }
+  } catch {
+    if (hint) hint.textContent = "";
+  }
+}
+
 async function loadInitialConfig() {
   const [devices, cfg, irStatus, verInfo, liveStatus] = await Promise.all([
     api("/api/audio/devices"),
@@ -158,6 +212,7 @@ async function loadInitialConfig() {
   $("resample-rate").value = cfg.audio.resample_rate;
   $("resample-bits").value = cfg.audio.resample_bit_depth;
   $("resample-algo").value = cfg.audio.resample_algorithm;
+  refreshResampleCapabilities(cfg.audio.device_id);
 
   $("vol-mode").value = cfg.volume.mode;
   $("vol-curve").value = cfg.volume.curve;
@@ -264,6 +319,10 @@ $("save-audio").addEventListener("click", async () => {
     return;
   }
   showToast("Audio settings applied");
+});
+
+$("audio-device").addEventListener("change", (e) => {
+  refreshResampleCapabilities(e.target.value);
 });
 
 $("btn-audio-caps").addEventListener("click", async () => {
