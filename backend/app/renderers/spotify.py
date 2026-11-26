@@ -69,6 +69,7 @@ class SpotifyRenderer(RendererAdapter):
         self._using_go_librespot: bool = False
         self._ws_stop = threading.Event()
         self._ws_thread: Optional[threading.Thread] = None
+        self._ws_conn = None
         self._on_client_volume: Optional[Callable[[int], None]] = None
         self._last_pushed_at: float = 0.0
         self._go_librespot_ok: Optional[tuple[float, bool]] = None
@@ -190,16 +191,17 @@ class SpotifyRenderer(RendererAdapter):
             while not self._ws_stop.is_set() and self.is_running():
                 try:
                     with connect(ws_url, open_timeout=3) as ws:
+                        self._ws_conn = ws
                         while not self._ws_stop.is_set() and self.is_running():
-                            raw = ws.recv(timeout=1.0)
+                            raw = ws.recv()
                             if not raw:
                                 continue
                             self._handle_ws_event(json.loads(raw))
-                except TimeoutError:
-                    continue
                 except Exception:
                     if self._ws_stop.wait(1.0):
                         break
+                finally:
+                    self._ws_conn = None
 
         self._ws_thread = threading.Thread(
             target=_listen, daemon=True, name="go-librespot-ws"
@@ -208,6 +210,12 @@ class SpotifyRenderer(RendererAdapter):
 
     def _stop_events_listener(self) -> None:
         self._ws_stop.set()
+        conn = self._ws_conn
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
         if self._ws_thread and self._ws_thread.is_alive():
             self._ws_thread.join(timeout=1.0)
         self._ws_thread = None
