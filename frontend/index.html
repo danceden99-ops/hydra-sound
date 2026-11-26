@@ -169,7 +169,6 @@
     <section class="card tab-panel" id="tab-services">
       <div class="card-header">
         <h2>Streaming Services &amp; Module Updates</h2>
-        <button class="btn btn-sm btn-outline" id="btn-check-updates">Check Upstream Updates</button>
       </div>
 
       <div class="form-grid">
@@ -255,7 +254,10 @@
 
       <button class="btn btn-primary" id="save-services">Save Service Settings</button>
 
-      <h3>Installed Modules &amp; Upstream Releases</h3>
+      <div class="card-header" style="margin-top: 20px;">
+        <h3>Installed Modules &amp; Upstream Releases</h3>
+        <button class="btn btn-sm btn-outline" id="btn-check-updates">Check Upstream Updates</button>
+      </div>
       <p id="modules-update-status" class="hint"></p>
       <div id="modules-list" class="modules-list">Click "Check Upstream Updates" to query GitHub releases.</div>
     </section>
