@@ -115,6 +115,7 @@ def build_camilladsp_config(
             "parameters": {
                 "ramp_time": 120,
                 "fader": "Aux1",
+                "limit": 0.0,
             },
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["master_volume"]})

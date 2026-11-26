@@ -43,7 +43,7 @@ class VolumeController:
         self._lock = asyncio.Lock()
 
     def clamp_volume(self, value: int, cfg: VolumeConfig) -> int:
-        max_allowed = max(1, min(100, int(cfg.max_volume)))
+        max_allowed = max(0, min(100, int(cfg.max_volume)))
         return max(0, min(max_allowed, int(value)))
 
     async def apply_power_on(
@@ -126,7 +126,8 @@ class VolumeController:
         if vol_cfg.mode == "hardware":
             self._apply_hardware_alsa(audio_cfg.device_id, vol_cfg)
         elif vol_cfg.mode == "software":
-            db = percent_to_db(vol_cfg.current_volume, vol_cfg.curve)
+            max_db = percent_to_db(vol_cfg.max_volume, vol_cfg.curve)
+            db = min(percent_to_db(vol_cfg.current_volume, vol_cfg.curve), max_db)
             await self.camilla.set_volume_db(db, muted=vol_cfg.muted)
 
         if notify_client and self.on_volume_changed:
@@ -139,21 +140,25 @@ class VolumeController:
         mixer = vol_cfg.hardware_mixer_name or "PCM"
         try:
             available = list_mixers(int(card))
-            if available and mixer not in available:
+            playback_mixers = [
+                m for m in available
+                if not any(k in m.lower() for k in ("mic", "capture", "adc", "input", "boost"))
+            ] or available
+            if playback_mixers and mixer not in available:
                 logger.info(
                     "ALSA mixer '%s' not found on card %s; using '%s'.",
                     mixer,
                     card,
-                    available[0],
+                    playback_mixers[0],
                 )
-                mixer = available[0]
+                mixer = playback_mixers[0]
         except Exception:
             pass
         safe_level = self.clamp_volume(vol_cfg.current_volume, vol_cfg)
         target = "0%" if vol_cfg.muted else f"{safe_level}%"
         try:
             res = subprocess.run(
-                ["amixer", "-c", card, "sset", mixer, target],
+                ["amixer", "-M", "-c", card, "sset", mixer, target],
                 capture_output=True,
                 text=True,
                 timeout=2,
