@@ -84,6 +84,8 @@ class QobuzRenderer(RendererAdapter):
             self._last_bits = int(m.group(2))
 
         if "Audio thread: playing track" in line or "Audio thread: resumed" in line:
+            self.connection_status = "connected"
+            self.connection_detail = "Connected & playing"
             _post_qobuz_event(
                 {
                     "source": "qobuz",
@@ -94,8 +96,12 @@ class QobuzRenderer(RendererAdapter):
                 }
             )
         elif "Audio thread: paused" in line:
+            self.connection_status = "connected"
+            self.connection_detail = "Paused"
             _post_qobuz_event({"source": "qobuz", "event": "pause"})
         elif "Audio thread: suspended" in line:
+            self.connection_status = "advertising"
+            self.connection_detail = "Discoverable on LAN"
             _post_qobuz_event({"source": "qobuz", "event": "stop"})
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:

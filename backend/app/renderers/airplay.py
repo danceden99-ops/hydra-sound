@@ -187,6 +187,8 @@ metadata = {{
                                 cur["album"] = val
                             elif code == "6d64656e":  # mden (metadata bundle end)
                                 if any(cur.values()):
+                                    self.connection_status = "connected"
+                                    self.connection_detail = "Connected & playing"
                                     _post_airplay_metadata(cur["title"], cur["artist"], cur["album"])
                 except Exception:
                     if self._meta_stop.wait(1.0):
