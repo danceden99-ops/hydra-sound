@@ -81,6 +81,13 @@ function updateLiveUI(data) {
       hwBanner.hidden = true;
     }
   }
+  const toneBtn = $("btn-test-tone");
+  if (toneBtn) {
+    const active = Boolean(data.test_tone_active);
+    toneBtn.textContent = active ? "Stop Test Tone" : "Play Test Tone (440 Hz)";
+    toneBtn.classList.toggle("btn-danger", active);
+    toneBtn.classList.toggle("btn-outline", !active);
+  }
   const disabled = volume.mode === "disabled";
   $("vol-slider").disabled = disabled;
   $("btn-mute").disabled = disabled;
@@ -338,6 +345,15 @@ $("btn-audio-caps").addEventListener("click", async () => {
     text += `\n\n[USB Audio Descriptor (/proc/asound/.../stream0)]\n${caps.usb_stream}`;
   }
   out.textContent = text;
+});
+
+$("btn-test-tone").addEventListener("click", async () => {
+  const res = await api("/api/audio/test-tone", "POST");
+  if (res.playing) {
+    showToast(`Test tone playing at ${res.volume.current_volume}% volume`);
+  } else {
+    showToast("Test tone stopped");
+  }
 });
 
 $("save-volume").addEventListener("click", async () => {

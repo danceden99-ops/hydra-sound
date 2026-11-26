@@ -11,10 +11,12 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from app.audio.alsa import (
+    format_named_alsa_device,
     get_device_capabilities,
     get_usb_device_identity,
     invalidate_usb_cache,
     list_audio_devices,
+    select_best_pcm_format,
 )
 from app.config import (
     AudioOutputConfig,
@@ -86,6 +88,7 @@ async def get_status(request: Request) -> dict:
         "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume),
         "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
         "hardware_volume_error": state.volume_controller.hardware_error,
+        "test_tone_active": _is_test_tone_running(state),
         "renderers": state.orchestrator.get_renderers_status(cfg),
     }
 
@@ -109,9 +112,66 @@ async def get_audio_devices() -> list[dict]:
     return [asdict(d) for d in list_audio_devices()]
 
 
+def _is_test_tone_running(state) -> bool:
+    proc = getattr(state, "test_tone_proc", None)
+    return proc is not None and proc.poll() is None
+
+
+def _stop_test_tone(state) -> None:
+    import subprocess
+
+    proc = getattr(state, "test_tone_proc", None)
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    state.test_tone_proc = None
+
+
 @router.get("/audio/capabilities")
 async def get_audio_capabilities(device_id: str) -> dict:
     return get_device_capabilities(device_id)
+
+
+@router.post("/audio/test-tone")
+async def toggle_test_tone(request: Request) -> dict:
+    import subprocess
+
+    state = request.app.state
+    cfg: HydraConfig = state.config_store.get()
+
+    if _is_test_tone_running(state):
+        _stop_test_tone(state)
+        return {"ok": True, "playing": False, "volume": cfg.volume.model_dump()}
+
+    if cfg.volume.mode != "disabled":
+        cfg.volume.muted = False
+        await state.volume_controller.set_volume(50, cfg.audio, cfg.volume)
+        state.config_store.save(cfg)
+
+    target = state.pipeline.get_renderer_alsa_device(cfg.audio, cfg.volume)
+    is_hdmi = "hdmi" in cfg.audio.device_name.lower()
+    if target not in ("camilladsp",) and "loopback" not in target.lower():
+        target = format_named_alsa_device(target, is_hdmi=is_hdmi)
+
+    fmt = select_best_pcm_format(cfg.audio.device_id)
+    if fmt == "S24_4_RJ_LE":
+        fmt = "S24_LE"
+    elif fmt not in ("S16_LE", "S24_3_LE", "S32_LE"):
+        fmt = "S32_LE"
+
+    cmd = ["speaker-test", "-D", target, "-c", "2", "-t", "sine", "-f", "440", "-F", fmt]
+    try:
+        state.test_tone_proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="speaker-test (alsa-utils) is not installed")
+    return {"ok": True, "playing": True, "volume": cfg.volume.model_dump()}
 
 
 @router.put("/config/audio")

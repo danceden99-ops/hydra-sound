@@ -146,6 +146,9 @@ async def lifespan(app: FastAPI):
 
     hotplug_monitor.stop()
     ir_manager.stop_listener()
+    proc = getattr(app.state, "test_tone_proc", None)
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
     orchestrator.stop_all()
     root_logger.removeHandler(log_handler)
 
