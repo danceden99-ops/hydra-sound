@@ -67,7 +67,9 @@ class QobuzRenderer(RendererAdapter):
         self._last_pushed_at = time.monotonic()
         target = max(0, min(100, int(volume_percent)))
         self._last_reported_vol = target
-        payload = json.dumps({"volume": target, "mute": bool(muted)}).encode("utf-8")
+        payload = json.dumps(
+            {"volume": round(target / 100.0, 4), "mute": bool(muted)}
+        ).encode("utf-8")
 
         def _send() -> None:
             try:

@@ -467,6 +467,40 @@ def test_qobuz_volume_sync_and_debounce() -> None:
     assert renderer._should_log_line("2026-11-26 21:03:06.105 INFO  pibuz::qconnect::sink [QConnect] Renderer updated: playing_state=Some(3) volume=Some(33)") is True
 
 
+def test_qobuz_set_client_volume_normalized_scale(monkeypatch) -> None:
+    import json
+    from app.renderers import qobuz as qobuz_mod
+    from app.renderers.qobuz import QobuzRenderer
+
+    captured: list[dict] = []
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def _fake_urlopen(req, timeout=2):
+        captured.append(json.loads(req.data.decode("utf-8")))
+        return _FakeResp()
+
+    class _ImmediateThread:
+        def __init__(self, target=None, daemon=None):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(qobuz_mod.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(qobuz_mod.threading, "Thread", _ImmediateThread)
+
+    renderer = QobuzRenderer()
+    monkeypatch.setattr(renderer, "is_running", lambda: True)
+    renderer.set_client_volume(25, True)
+    assert captured == [{"volume": 0.25, "mute": True}]
+
+
 def test_hardware_mode_falls_back_to_software_on_missing_mixer(monkeypatch) -> None:
     from app.volume import controller as vol_mod
 
