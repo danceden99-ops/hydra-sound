@@ -87,6 +87,16 @@ class QobuzRenderer(RendererAdapter):
     def is_enabled(self, cfg: HydraConfig) -> bool:
         return cfg.renderers.qobuz.enabled
 
+    def _should_log_line(self, line: str) -> bool:
+        if " INFO " in line and (
+            "[QConnect/Decode]" in line
+            or "[QConnect/Transport]" in line
+            or "[QConnect] Session management:" in line
+            or "Renderer command applied:" in line
+        ):
+            return False
+        return True
+
     def _update_connection_state(self, line: str) -> None:
         super()._update_connection_state(line)
         if "FILE_AUDIO_QUALITY_CHANGED" in line and "payload=" in line:
@@ -143,7 +153,7 @@ class QobuzRenderer(RendererAdapter):
             if (
                 self._on_client_volume is not None
                 and vol != self._last_reported_vol
-                and (time.monotonic() - self._last_pushed_at) > 0.5
+                and (time.monotonic() - self._last_pushed_at) > 0.15
             ):
                 self._last_reported_vol = vol
                 self._on_client_volume(vol)

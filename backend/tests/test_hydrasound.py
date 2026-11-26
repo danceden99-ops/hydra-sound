@@ -462,6 +462,9 @@ def test_qobuz_volume_sync_and_debounce() -> None:
     )
     assert received == [55]
 
+    assert renderer._should_log_line("2026-11-26 21:03:06.105 INFO  qconnect_transport_ws::transport [QConnect/Decode] Decoding QConnectBatch: 21 bytes") is False
+    assert renderer._should_log_line("2026-11-26 21:03:06.105 INFO  pibuz::qconnect::sink [QConnect] Renderer updated: playing_state=Some(3) volume=Some(33)") is True
+
 
 
 

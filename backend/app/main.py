@@ -129,17 +129,42 @@ async def lifespan(app: FastAPI):
     )
 
     loop = asyncio.get_running_loop()
+    pending_client_vol: dict[str, Optional[int]] = {"value": None}
+    client_vol_task_active = False
+
+    async def _drain_client_volume() -> None:
+        nonlocal client_vol_task_active
+        try:
+            while pending_client_vol["value"] is not None:
+                pct = pending_client_vol["value"]
+                pending_client_vol["value"] = None
+                cur_cfg = config_store.get()
+                if cur_cfg.volume.mode == "disabled":
+                    continue
+                clamped = volume_controller.clamp_volume(pct, cur_cfg.volume)
+                await volume_controller.set_volume(
+                    pct,
+                    cur_cfg.audio,
+                    cur_cfg.volume,
+                    notify_client=(clamped != pct),
+                )
+                config_store.save(cur_cfg)
+        finally:
+            client_vol_task_active = False
 
     def _on_client_volume(pct: int) -> None:
         cur_cfg = config_store.get()
         if cur_cfg.volume.mode == "disabled":
             return
 
-        async def _apply() -> None:
-            await volume_controller.set_volume(pct, cur_cfg.audio, cur_cfg.volume)
-            config_store.save(cur_cfg)
+        def _enqueue() -> None:
+            nonlocal client_vol_task_active
+            pending_client_vol["value"] = pct
+            if not client_vol_task_active:
+                client_vol_task_active = True
+                asyncio.create_task(_drain_client_volume())
 
-        asyncio.run_coroutine_threadsafe(_apply(), loop)
+        loop.call_soon_threadsafe(_enqueue)
 
     for renderer_name in ("spotify", "qobuz"):
         renderer = orchestrator.renderers.get(renderer_name)

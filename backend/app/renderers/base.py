@@ -96,7 +96,8 @@ class RendererAdapter(ABC):
                 clean = line.strip()
                 if clean:
                     self._update_connection_state(clean)
-                    logger.warning("[%s] %s", self.meta.id, clean)
+                    if self._should_log_line(clean):
+                        logger.warning("[%s] %s", self.meta.id, clean)
         except Exception:
             pass
         if not self._stopping and self._proc is proc and self._last_cfg is not None:
@@ -105,6 +106,10 @@ class RendererAdapter(ABC):
             time.sleep(2.0)
             if not self._stopping and self._proc is proc and self._last_cfg is not None:
                 self.start(self._last_cfg, self._last_alsa_device)
+
+    def _should_log_line(self, line: str) -> bool:
+        """Return False to suppress noisy INFO-level trace lines from renderer output."""
+        return True
 
     def _update_connection_state(self, line: str) -> None:
         """Infer live login/pairing/error state from renderer output."""
