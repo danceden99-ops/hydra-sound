@@ -5,6 +5,8 @@ ASSET_URL="https://github.com/danceden99-ops/hydra-sound/releases/latest/downloa
 SHA_URL="${ASSET_URL}.sha256"
 
 if [[ "${PREFER_SOURCE:-0}" != "1" ]] && [[ "$(uname -m)" == "aarch64" ]]; then
+  apt-get update && apt-get install -y libogg0 libvorbis0a libvorbisfile3 libmpg123-0 >/dev/null 2>&1 || true
+  apt-get install -y libflac12 >/dev/null 2>&1 || apt-get install -y libflac14 >/dev/null 2>&1 || true
   TMP_DIR=$(mktemp -d)
   if curl -fsSL "$ASSET_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz"; then
     if curl -fsSL "$SHA_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz.sha256" 2>/dev/null; then
