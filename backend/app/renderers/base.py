@@ -99,11 +99,11 @@ class RendererAdapter(ABC):
                     logger.warning("[%s] %s", self.meta.id, clean)
         except Exception:
             pass
-        if not self._stopping and self._last_cfg is not None:
+        if not self._stopping and self._proc is proc and self._last_cfg is not None:
             code = proc.poll()
             logger.warning("[%s] exited (code=%s); restarting in 2s.", self.meta.id, code)
             time.sleep(2.0)
-            if not self._stopping and self._last_cfg is not None:
+            if not self._stopping and self._proc is proc and self._last_cfg is not None:
                 self.start(self._last_cfg, self._last_alsa_device)
 
     def _update_connection_state(self, line: str) -> None:
