@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     cfg = config_store.get()
 
     log_handler = Rolling500FileHandler(
-        max_entries=500, enabled=cfg.system.logging_enabled
+        max_entries=2000, enabled=cfg.system.logging_enabled
     )
     log_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
