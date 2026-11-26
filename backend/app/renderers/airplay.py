@@ -114,6 +114,7 @@ alsa = {{
 sessioncontrol = {{
   run_this_before_play_begins = "/opt/hydrasound/scripts/hooks/airplay_event.sh play";
   run_this_after_play_ends = "/opt/hydrasound/scripts/hooks/airplay_event.sh stop";
+  wait_for_completion = "yes";
 }};
 
 metadata = {{

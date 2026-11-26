@@ -138,6 +138,8 @@ class StreamOrchestrator:
             self._cancel_pause_timer()
             self._release_lock()
             if prev in self.renderers and self.renderers[prev].is_enabled(cfg):
+                self.renderers[prev].stop()
+                await asyncio.sleep(0.4)
                 self.renderers[prev].start(cfg, self._current_alsa_device)
 
         if event in ("play", "playing", "start", "metadata"):

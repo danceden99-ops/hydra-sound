@@ -81,6 +81,29 @@ class SpotifyRenderer(RendererAdapter):
     def is_enabled(self, cfg: HydraConfig) -> bool:
         return cfg.renderers.spotify.enabled
 
+    def _update_connection_state(self, line: str) -> None:
+        super()._update_connection_state(line)
+        if self._using_go_librespot and (
+            "output device failed" in line or "failed starting playback: ALSA error" in line
+        ):
+            def _retry_play() -> None:
+                time.sleep(0.8)
+                if not self.is_running():
+                    return
+                try:
+                    req = urllib.request.Request(
+                        f"http://127.0.0.1:{GO_LIBRESPOT_API_PORT}/player/resume",
+                        data=b"{}",
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=2):
+                        pass
+                except Exception:
+                    pass
+
+            threading.Thread(target=_retry_play, daemon=True).start()
+
     def _has_go_librespot(self) -> bool:
         now = time.monotonic()
         if self._go_librespot_ok and now - self._go_librespot_ok[0] < 60.0:
