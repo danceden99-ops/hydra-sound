@@ -384,10 +384,11 @@ async def test_alsa_cdsp_template_and_statefile_volume_limits(
     camilla.configure_alsa_cdsp(audio, vol, asound_conf_path=asound_conf)
     asound_txt = asound_conf.read_text(encoding="utf-8")
     assert "type cdsp" in asound_txt
+    assert "config_cdsp 1" in asound_txt
     assert "channels 2" in asound_txt
     assert "rates = [" in asound_txt
 
-    tmpl_text = camilla.template_path.read_text(encoding="utf-8")
+    tmpl_text = camilla.config_path.read_text(encoding="utf-8")
     assert "channels: $channels$" in tmpl_text
     assert "capture_samplerate: $samplerate$" in tmpl_text
     assert "type: Stdin" in tmpl_text

@@ -278,8 +278,8 @@ class CamillaDSPManager:
         """Configure alsa_cdsp template and /etc/asound.conf for native-rate DSP."""
         self.stop()
         self._cdsp_mode = True
-        self.template_path.parent.mkdir(parents=True, exist_ok=True)
-        self.template_path.write_text(
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config_path.write_text(
             self.render_cdsp_template(audio_cfg, volume_cfg), encoding="utf-8"
         )
         if not self.statefile_path.exists():
@@ -290,8 +290,8 @@ class CamillaDSPManager:
             "pcm.camilladsp {\n"
             "    type cdsp\n"
             '    cpath "/usr/local/bin/camilladsp"\n'
-            f'    config_in "{self.template_path}"\n'
             f'    config_out "{self.config_path}"\n'
+            "    config_cdsp 1\n"
             "    channels 2\n"
             "    rates = [ 44100 48000 88200 96000 176400 192000 352800 384000 ]\n"
             f'    cargs [ -p "{CAMILLA_WS_PORT}" -a "127.0.0.1" '
