@@ -28,6 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -67,6 +68,8 @@ async def lifespan(app: FastAPI):
     app.state.network_manager = network_manager
     app.state.hotplug_monitor = hotplug_monitor
 
+    if cfg.volume.mode == "hardware":
+        await volume_controller.apply_power_on(cfg.audio, cfg.volume)
     orchestrator.start_enabled_renderers(cfg)
     await volume_controller.apply_power_on(cfg.audio, cfg.volume)
     config_store.save(cfg)

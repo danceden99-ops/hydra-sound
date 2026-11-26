@@ -282,3 +282,22 @@ async def test_orchestrator_stores_artwork_url() -> None:
     assert res["accepted"] is True
     assert orch.stream.artwork_url == "https://i.scdn.co/image/test123"
 
+
+def test_percent_to_db_monotonic_and_camilladsp_limit() -> None:
+    for curve in ("logarithmic", "linear"):
+        prev = -999.0
+        for p in range(0, 101, 5):
+            db = percent_to_db(p, curve)
+            assert db >= prev
+            assert db <= 0.0
+            prev = db
+
+    audio = AudioOutputConfig(device_id="hw:1,0")
+    vol = VolumeConfig(mode="software", max_volume=60, curve="logarithmic")
+    cfg = build_camilladsp_config(audio, vol)
+    assert cfg["filters"]["master_volume"]["parameters"]["fader"] == "Aux1"
+    assert cfg["filters"]["master_volume"]["parameters"]["limit"] == round(
+        percent_to_db(60, "logarithmic"), 2
+    )
+
+

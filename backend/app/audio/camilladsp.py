@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import asyncio
 import json
 import logging
 import os
@@ -44,6 +43,22 @@ def bit_depth_to_alsa_format(bit_depth: int) -> str:
         24: "S24_3_LE",
         32: "S32_LE",
     }.get(bit_depth, "S32_LE")
+
+
+def percent_to_db(percent: int, curve: str = "logarithmic", min_db: float = -80.0) -> float:
+    """Convert 0..100% volume into dB attenuation (-80.0..0.0 dB)."""
+    pct = max(0, min(100, int(percent)))
+    if pct == 0:
+        return min_db
+    if pct == 100:
+        return 0.0
+    if curve == "linear":
+        import math
+
+        return max(min_db, 20.0 * math.log10(pct / 100.0))
+    # Logarithmic (perceptual audio taper: 50% ~ -20.8 dB, 1% ~ -77.1 dB)
+    norm = pct / 100.0
+    return max(min_db, min_db * ((1.0 - norm) ** 1.95))
 
 
 def build_camilladsp_config(
@@ -112,12 +127,13 @@ def build_camilladsp_config(
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["safety_mute"]})
     elif volume_cfg.mode == "software":
+        max_db = round(percent_to_db(volume_cfg.max_volume, volume_cfg.curve), 2)
         filters["master_volume"] = {
             "type": "Volume",
             "parameters": {
                 "ramp_time": 120,
                 "fader": "Aux1",
-                "limit": 0.0,
+                "limit": max_db,
             },
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["master_volume"]})
@@ -208,9 +224,9 @@ class CamillaDSPManager:
                 return
             try:
                 async with websockets.connect(uri, open_timeout=1.5) as ws:
-                    await ws.send(json.dumps({"SetVolume": db}))
+                    await ws.send(json.dumps({"SetFaderVolume": [1, db]}))
                     await ws.recv()
-                    await ws.send(json.dumps({"SetMute": muted}))
+                    await ws.send(json.dumps({"SetFaderMute": [1, muted]}))
                     await ws.recv()
                 return
             except Exception as exc:

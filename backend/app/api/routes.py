@@ -243,6 +243,9 @@ async def release_stream_lock(request: Request) -> dict:
 
 @router.post("/internal/event")
 async def internal_renderer_event(payload: RendererEventRequest, request: Request) -> dict:
+    client_host = request.client.host if request.client else ""
+    if client_host not in ("127.0.0.1", "::1", "localhost", "testclient"):
+        raise HTTPException(status_code=403, detail="Internal events restricted to loopback")
     state = request.app.state
     cfg: HydraConfig = state.config_store.get()
     return await state.orchestrator.handle_renderer_event(
