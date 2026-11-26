@@ -52,6 +52,11 @@ async def lifespan(app: FastAPI):
         camilla=camilla,
         on_volume_changed=orchestrator.push_volume_to_active_client,
     )
+    orchestrator.set_volume_reapply_callback(
+        lambda cur_cfg: volume_controller.apply(
+            cur_cfg.audio, cur_cfg.volume, notify_client=False
+        )
+    )
     ir_manager = IRManager()
     network_manager = NetworkManager()
     hotplug_monitor = USBHotplugMonitor()
@@ -110,8 +115,11 @@ async def lifespan(app: FastAPI):
             cur_cfg.volume.power_on_volume, cur_cfg.volume
         )
         config_store.save(cur_cfg)
+        if cur_cfg.volume.mode == "hardware":
+            await volume_controller.apply(cur_cfg.audio, cur_cfg.volume)
         orchestrator.start_enabled_renderers(cur_cfg)
-        await volume_controller.apply(cur_cfg.audio, cur_cfg.volume)
+        if cur_cfg.volume.mode != "hardware":
+            await volume_controller.apply(cur_cfg.audio, cur_cfg.volume)
 
     hotplug_monitor.start(
         asyncio.get_running_loop(),

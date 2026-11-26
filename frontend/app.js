@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+let currentMuted = false;
 
 function showToast(msg) {
   const t = $("toast");
@@ -85,6 +86,7 @@ function updateLiveUI(data) {
   $("btn-mute").disabled = disabled;
   $("vol-slider").max = volume.max_volume;
   $("vol-slider").value = volume.current_volume;
+  currentMuted = Boolean(volume.muted);
   $("vol-value").textContent = volume.muted ? "MUTED" : `${volume.current_volume}%`;
 
   const strip = $("renderer-status-strip");
@@ -290,7 +292,7 @@ $("save-volume").addEventListener("click", async () => {
     max_volume: Number($("vol-max").value),
     step_size: Number($("vol-step").value),
     current_volume: Number($("vol-slider").value),
-    muted: false,
+    muted: currentMuted,
     hardware_mixer_name: $("vol-hw-mixer").value || "PCM",
     usb_disabled_confirmed: confirmed,
   });

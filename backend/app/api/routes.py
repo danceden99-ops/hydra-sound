@@ -140,8 +140,11 @@ async def update_audio_config(payload: AudioOutputConfig, request: Request) -> d
             cfg.volume.power_on_volume, cfg.volume
         )
     state.config_store.save(cfg)
+    if cfg.volume.mode == "hardware":
+        await state.volume_controller.apply(cfg.audio, cfg.volume)
     state.orchestrator.start_enabled_renderers(cfg)
-    await state.volume_controller.apply(cfg.audio, cfg.volume)
+    if cfg.volume.mode != "hardware":
+        await state.volume_controller.apply(cfg.audio, cfg.volume)
     return {
         "ok": True,
         "audio": cfg.audio.model_dump(),
@@ -152,21 +155,34 @@ async def update_audio_config(payload: AudioOutputConfig, request: Request) -> d
 @router.put("/config/volume")
 async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
     state = request.app.state
-    cfg: HydraConfig = state.config_store.get()
-    mode_changed = cfg.volume.mode != payload.mode
-    if payload.mode != "disabled":
-        payload.usb_disabled_confirmed = False
-    cfg.volume = payload
-    cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
-        cfg.volume.power_on_volume, cfg.volume
-    )
-    cfg.volume.current_volume = state.volume_controller.clamp_volume(
-        cfg.volume.current_volume, cfg.volume
-    )
-    state.config_store.save(cfg)
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        mode_changed = cfg.volume.mode != payload.mode
+        max_changed = cfg.volume.max_volume != payload.max_volume
+        curve_changed = cfg.volume.curve != payload.curve
+        if payload.mode != "disabled":
+            payload.usb_disabled_confirmed = False
+        cfg.volume = payload
+        cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
+            cfg.volume.power_on_volume, cfg.volume
+        )
+        cfg.volume.current_volume = state.volume_controller.clamp_volume(
+            cfg.volume.current_volume, cfg.volume
+        )
+        state.config_store.save(cfg)
+
+    if cfg.volume.mode == "hardware":
+        await state.volume_controller.apply(cfg.audio, cfg.volume)
     if mode_changed or state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume):
         state.orchestrator.start_enabled_renderers(cfg)
-    await state.volume_controller.apply(cfg.audio, cfg.volume)
+    elif cfg.volume.mode == "software" and (max_changed or curve_changed):
+        state.orchestrator.pipeline.apply(
+            cfg.audio,
+            cfg.volume,
+            capture_rate=state.orchestrator._active_capture_rate,
+        )
+    if cfg.volume.mode != "hardware":
+        await state.volume_controller.apply(cfg.audio, cfg.volume)
     return {
         "ok": True,
         "volume": cfg.volume.model_dump(),

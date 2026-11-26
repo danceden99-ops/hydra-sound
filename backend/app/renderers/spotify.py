@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 import yaml
 
-from app.audio.alsa import is_usb_audio_device
+from app.audio.alsa import is_usb_audio_device, select_best_pcm_format
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
@@ -157,10 +157,13 @@ class SpotifyRenderer(RendererAdapter):
             "--onevent",
             "/opt/hydrasound/scripts/hooks/librespot_event.sh",
         ]
-        if "loopback" in alsa_device.lower() or is_usb_audio_device(
+        best_fmt = select_best_pcm_format(alsa_device)
+        if "loopback" in alsa_device.lower() or best_fmt == "S32_LE" or is_usb_audio_device(
             alsa_device, cfg.audio.device_name
         ):
             cmd.extend(["--format", "S32", "--dither", "none"])
+        elif best_fmt in ("S24_3_LE", "S24_4_RJ_LE"):
+            cmd.extend(["--format", "S24_3", "--dither", "none"])
 
         if sc.auth_mode == "credentials" and sc.username and sc.password:
             cmd.extend(["--username", sc.username, "--password", sc.password])

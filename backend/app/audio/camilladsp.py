@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import subprocess
 from pathlib import Path
@@ -47,19 +48,29 @@ def bit_depth_to_alsa_format(bit_depth: int) -> str:
 
 
 def percent_to_db(percent: int, curve: str = "logarithmic", min_db: float = -80.0) -> float:
-    """Convert 0..100% volume into dB attenuation (-80.0..0.0 dB)."""
-    pct = max(0, min(100, int(percent)))
-    if pct == 0:
+    """Convert 0-100% volume to dB using logarithmic (perceptual) or linear scaling."""
+    clamped = max(0, min(100, int(percent)))
+    if clamped == 0:
         return min_db
-    if pct == 100:
-        return 0.0
-    if curve == "linear":
-        import math
+    ratio = clamped / 100.0
+    if curve == "logarithmic":
+        # Perceptually smooth exponential amplitude -> dB
+        # 100% -> 0 dB, 50% -> ~-20.8 dB, 1% -> ~-77.1 dB
+        return round(min_db * (1.0 - math.log10(1.0 + 9.0 * ratio)), 2)
+    db = 20.0 * math.log10(ratio)
+    return round(max(min_db, db), 2)
 
-        return max(min_db, 20.0 * math.log10(pct / 100.0))
-    # Logarithmic (perceptual audio taper: 50% ~ -20.8 dB, 1% ~ -77.1 dB)
-    norm = pct / 100.0
-    return max(min_db, min_db * ((1.0 - norm) ** 1.95))
+
+def get_effective_max_volume(vol_cfg: VolumeConfig) -> int:
+    """Return effective max_volume (0..100) respecting HYDRA_HARD_MAX_VOLUME."""
+    max_allowed = max(0, min(100, int(vol_cfg.max_volume)))
+    hard_cap_env = os.environ.get("HYDRA_HARD_MAX_VOLUME")
+    if hard_cap_env is not None:
+        try:
+            max_allowed = min(max_allowed, max(0, min(100, int(hard_cap_env))))
+        except ValueError:
+            pass
+    return max_allowed
 
 
 def build_camilladsp_config(
@@ -106,7 +117,7 @@ def build_camilladsp_config(
         },
     }
 
-    if audio_cfg.resample_enabled:
+    if audio_cfg.resample_enabled and capture_rate != target_rate:
         profile = RESAMPLER_PROFILES.get(
             audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
         )
@@ -129,7 +140,8 @@ def build_camilladsp_config(
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["safety_mute"]})
     elif volume_cfg.mode == "software":
-        max_db = round(percent_to_db(volume_cfg.max_volume, volume_cfg.curve), 2)
+        eff_max = get_effective_max_volume(volume_cfg)
+        max_db = round(percent_to_db(eff_max, volume_cfg.curve), 2)
         filters["master_volume"] = {
             "type": "Volume",
             "parameters": {
@@ -149,16 +161,22 @@ def build_camilladsp_config(
             },
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["dsp_limiter"]})
-        if audio_cfg.resample_bit_depth in (16, 24):
-            filters["dsp_dither"] = {
-                "type": "Dither",
-                "parameters": {
-                    "type": "Flat",
-                    "bits": audio_cfg.resample_bit_depth,
-                    "amplitude": 2.0,
-                },
-            }
-            pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["dsp_dither"]})
+
+    if (audio_cfg.resample_enabled or volume_cfg.mode == "software") and target_format in (
+        "S16_LE",
+        "S24_3_LE",
+        "S24_4_RJ_LE",
+    ):
+        dither_bits = 16 if target_format == "S16_LE" else 24
+        filters["dsp_dither"] = {
+            "type": "Dither",
+            "parameters": {
+                "type": "Flat",
+                "bits": dither_bits,
+                "amplitude": 2.0,
+            },
+        }
+        pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["dsp_dither"]})
 
     return {
         "devices": devices,
@@ -218,8 +236,7 @@ class CamillaDSPManager:
         if volume_cfg.mode == "software" or (
             volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed
         ):
-            cmd.append("--gain=-80.0")
-            cmd.append("--mute")
+            cmd.extend(["--gain=-80.0", "--mute", "--gain1=-80.0", "--mute1"])
         cmd.append(str(self.config_path))
         try:
             self._proc = subprocess.Popen(

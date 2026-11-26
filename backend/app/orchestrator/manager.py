@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Awaitable, Callable, Dict, Optional
 
 from app.audio.alsa import probe_active_hw_params
 from app.audio.pipeline import AudioPipelineManager
@@ -58,6 +58,13 @@ class StreamOrchestrator:
         self._pause_task: Optional[asyncio.Task] = None
         self._current_alsa_device: str = "hw:0,0"
         self._active_capture_rate: int = 44100
+        self._on_pipeline_restarted: Optional[Callable[[HydraConfig], Awaitable[None]]] = None
+
+    def set_volume_reapply_callback(
+        self, cb: Optional[Callable[[HydraConfig], Awaitable[None]]]
+    ) -> None:
+        """Register async callback to re-apply volume after CamillaDSP rate-change restart."""
+        self._on_pipeline_restarted = cb
 
     def start_enabled_renderers(self, cfg: HydraConfig) -> None:
         self._current_alsa_device = self.pipeline.apply(cfg.audio, cfg.volume)
@@ -158,6 +165,8 @@ class StreamOrchestrator:
                     self.pipeline.apply(
                         cfg.audio, cfg.volume, capture_rate=incoming_rate
                     )
+                    if self._on_pipeline_restarted:
+                        await self._on_pipeline_restarted(cfg)
             if incoming_bit_depth:
                 self.stream.incoming_bit_depth = incoming_bit_depth
             self.refresh_outgoing_format(cfg)

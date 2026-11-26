@@ -34,10 +34,26 @@ _APLAY_LINE_RE = re.compile(
 )
 
 
-def _classify_device(card_id: str, card_name: str, dev_name: str) -> str:
+def _is_sysfs_usb_card(card_num: Optional[int]) -> bool:
+    if card_num is None:
+        return False
+    if Path(f"/proc/asound/card{card_num}/usbid").exists():
+        return True
+    try:
+        resolved = Path(f"/sys/class/sound/card{card_num}/device").resolve()
+        return "/usb" in str(resolved).lower()
+    except Exception:
+        return False
+
+
+def _classify_device(
+    card_id: str, card_name: str, dev_name: str, card_num: Optional[int] = None
+) -> str:
     combined = f"{card_id} {card_name} {dev_name}".lower()
     if "hdmi" in combined or "vc4" in combined:
         return "hdmi"
+    if _is_sysfs_usb_card(card_num):
+        return "usb"
     if "usb" in combined or "dac" in combined or "audio" in card_id.lower():
         if "headphones" not in combined and "bcm2835" not in combined:
             return "usb"
@@ -60,7 +76,7 @@ def resolve_card_id(card: str) -> str:
 
 
 def format_named_alsa_device(alsa_device: str, is_hdmi: bool = False) -> str:
-    """Convert `hw:X,Y` to `plughw:CARD=<id>,DEV=Y` (HDMI) or `hw:CARD=<id>,DEV=Y` for `aplay -L` enumeration."""
+    """Convert `hw:X,Y` to `hdmi:CARD=<id>,DEV=Y` (HDMI) or `hw:CARD=<id>,DEV=Y`."""
     if "loopback" in alsa_device.lower() or not alsa_device.startswith("hw:"):
         return alsa_device
     parts = alsa_device.split(":", 1)[1].split(",")
@@ -68,8 +84,9 @@ def format_named_alsa_device(alsa_device: str, is_hdmi: bool = False) -> str:
         return alsa_device
     card_id = resolve_card_id(parts[0].strip())
     dev = parts[1].strip()
-    prefix = "plughw" if is_hdmi else "hw"
-    return f"{prefix}:CARD={card_id},DEV={dev}"
+    if is_hdmi:
+        return f"hdmi:CARD={card_id},DEV={dev}"
+    return f"hw:CARD={card_id},DEV={dev}"
 
 
 def list_mixers(card: int) -> List[str]:
@@ -128,7 +145,7 @@ def list_audio_devices() -> List[AudioDevice]:
                 device=dev,
                 name=card_name,
                 description=f"{card_name} — {dev_name} (hw:{card},{dev})",
-                device_type=_classify_device(card_id, card_name, dev_name),
+                device_type=_classify_device(card_id, card_name, dev_name, card_num=card),
                 mixers=list_mixers(card),
             )
         )
@@ -313,8 +330,25 @@ def get_device_capabilities(device_id: str) -> dict:
 _FORMAT_CACHE: Dict[str, Tuple[float, str]] = {}
 
 
+def _extract_stream0_playback_section(stream0_text: str) -> str:
+    """Return only the Playback section from `/proc/asound/cardX/stream0`."""
+    lines: List[str] = []
+    in_playback = False
+    for line in stream0_text.splitlines():
+        low = line.strip().lower()
+        if low.startswith("playback:"):
+            in_playback = True
+            continue
+        if low.startswith("capture:"):
+            in_playback = False
+            continue
+        if in_playback:
+            lines.append(line)
+    return "\n".join(lines) if lines else stream0_text
+
+
 def select_best_pcm_format(device_id: str) -> str:
-    """Return the highest supported ALSA PCM format (S32_LE > S24_3_LE > S24_LE > S16_LE)."""
+    """Return the highest supported CamillaDSP ALSA format (S32_LE > S24_3_LE > S24_4_RJ_LE > S16_LE)."""
     now = time.monotonic()
     cached = _FORMAT_CACHE.get(device_id)
     if cached and now - cached[0] < 60.0:
@@ -328,15 +362,23 @@ def select_best_pcm_format(device_id: str) -> str:
         stream0 = Path(f"/proc/asound/card{card}/stream0")
         if stream0.exists():
             try:
-                text = stream0.read_text(encoding="utf-8")
+                text = _extract_stream0_playback_section(stream0.read_text(encoding="utf-8"))
             except Exception:
                 text = ""
         if not text:
             caps = get_device_capabilities(device_id)
-            text = (caps.get("hw_params") or "") + "\n" + (caps.get("usb_stream") or "")
-        for fmt in ("S32_LE", "S24_3_LE", "S24_LE", "S16_LE"):
-            if fmt in text:
-                best = fmt
+            text = caps.get("hw_params") or ""
+        # Linux usb-audio reports packed 24-bit as S24_3LE; CamillaDSP uses S24_3_LE.
+        # ALSA 4-byte right-justified S24_LE maps to S24_4_RJ_LE in CamillaDSP 4.x.
+        for token, camilla_fmt in (
+            ("S32_LE", "S32_LE"),
+            ("S24_3_LE", "S24_3_LE"),
+            ("S24_3LE", "S24_3_LE"),
+            ("S24_LE", "S24_4_RJ_LE"),
+            ("S16_LE", "S16_LE"),
+        ):
+            if token in text:
+                best = camilla_fmt
                 break
     _FORMAT_CACHE[device_id] = (now, best)
     return best

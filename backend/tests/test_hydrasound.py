@@ -325,4 +325,41 @@ async def test_hardware_mode_missing_mixer_sets_error(monkeypatch) -> None:
     assert ctrl.hardware_error is not None
 
 
+def test_stream0_playback_parsing_and_hdmi_format(monkeypatch) -> None:
+    from app.audio import alsa
+
+    sample_stream0 = (
+        "Playback:\n"
+        "  Interface 1\n"
+        "    Format: S24_3LE\n"
+        "Capture:\n"
+        "  Interface 2\n"
+        "    Format: S32_LE\n"
+    )
+    assert "S32_LE" not in alsa._extract_stream0_playback_section(sample_stream0)
+    assert "S24_3LE" in alsa._extract_stream0_playback_section(sample_stream0)
+
+    monkeypatch.setattr(alsa, "resolve_card_id", lambda c: "vc4hdmi0")
+    assert alsa.format_named_alsa_device("hw:1,0", is_hdmi=True) == "hdmi:CARD=vc4hdmi0,DEV=0"
+
+    # When capture_rate == resample_rate, resampler is omitted
+    audio_same = AudioOutputConfig(
+        device_id="hw:1,0",
+        resample_enabled=True,
+        resample_rate=96000,
+        resample_bit_depth=32,
+    )
+    vol = VolumeConfig(mode="software", max_volume=70)
+    cfg_same = build_camilladsp_config(audio_same, vol, capture_rate=96000)
+    assert "resampler" not in cfg_same["devices"]
+
+    # HYDRA_HARD_MAX_VOLUME is reflected in YAML limit
+    monkeypatch.setenv("HYDRA_HARD_MAX_VOLUME", "50")
+    cfg_capped = build_camilladsp_config(AudioOutputConfig(device_id="hw:1,0"), vol)
+    assert cfg_capped["filters"]["master_volume"]["parameters"]["limit"] == round(
+        percent_to_db(50, "logarithmic"), 2
+    )
+
+
+
 
