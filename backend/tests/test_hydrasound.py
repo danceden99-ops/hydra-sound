@@ -442,6 +442,27 @@ def test_24bit_spdif_dither_option() -> None:
     assert cfg["filters"]["dsp_dither"]["parameters"]["bits"] == 24
 
 
+def test_qobuz_volume_sync_and_debounce() -> None:
+    from app.renderers.qobuz import QobuzRenderer
+
+    renderer = QobuzRenderer()
+    received: list[int] = []
+    renderer.set_volume_callback(received.append)
+
+    renderer._update_connection_state(
+        "pibuz::qconnect::sink [QConnect] Renderer updated: playing_state=Some(Playing) volume=Some(55) position=Some(1234)"
+    )
+    assert received == [55]
+
+    # Simulate an immediate echo after Hydra pushes volume back to pibuz
+    renderer._last_pushed_at = 1e18
+    renderer._last_reported_vol = 60
+    renderer._update_connection_state(
+        "pibuz::qconnect::sink [QConnect] Renderer updated: playing_state=Some(Playing) volume=Some(65) position=Some(1235)"
+    )
+    assert received == [55]
+
+
 
 
 

@@ -129,18 +129,22 @@ async def lifespan(app: FastAPI):
     )
 
     loop = asyncio.get_running_loop()
-    spotify_renderer = orchestrator.renderers.get("spotify")
-    if hasattr(spotify_renderer, "set_volume_callback"):
-        def _on_spotify_volume(pct: int) -> None:
-            cur_cfg = config_store.get()
-            if cur_cfg.volume.mode == "disabled":
-                return
-            async def _apply() -> None:
-                await volume_controller.set_volume(pct, cur_cfg.audio, cur_cfg.volume)
-                config_store.save(cur_cfg)
-            asyncio.run_coroutine_threadsafe(_apply(), loop)
 
-        spotify_renderer.set_volume_callback(_on_spotify_volume)
+    def _on_client_volume(pct: int) -> None:
+        cur_cfg = config_store.get()
+        if cur_cfg.volume.mode == "disabled":
+            return
+
+        async def _apply() -> None:
+            await volume_controller.set_volume(pct, cur_cfg.audio, cur_cfg.volume)
+            config_store.save(cur_cfg)
+
+        asyncio.run_coroutine_threadsafe(_apply(), loop)
+
+    for renderer_name in ("spotify", "qobuz"):
+        renderer = orchestrator.renderers.get(renderer_name)
+        if hasattr(renderer, "set_volume_callback"):
+            renderer.set_volume_callback(_on_client_volume)
 
     yield
 

@@ -6,14 +6,16 @@ import json
 import re
 import subprocess
 import threading
+import time
 import urllib.request
-from typing import Optional
+from typing import Callable, Optional
 
 from app.audio.alsa import format_named_alsa_device
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
 _STREAM_INFO_RE = re.compile(r"(\d+)Hz,\s*\d+\s*(?:ch|channels?),\s*(\d+)-bit")
+_VOLUME_RE = re.compile(r"Renderer updated:.*?volume=Some\((\d+)\)")
 
 
 def _post_qobuz_event(payload: dict) -> None:
@@ -50,6 +52,37 @@ class QobuzRenderer(RendererAdapter):
         super().__init__()
         self._last_rate: Optional[int] = None
         self._last_bits: Optional[int] = None
+        self._on_client_volume: Optional[Callable[[int], None]] = None
+        self._last_pushed_at: float = 0.0
+        self._last_reported_vol: Optional[int] = None
+
+    def set_volume_callback(self, cb: Optional[Callable[[int], None]]) -> None:
+        """Register callback invoked when the Qobuz app changes volume."""
+        self._on_client_volume = cb
+
+    def set_client_volume(self, volume_percent: int, muted: bool) -> None:
+        """Push Hydra volume/mute state to pibuz so the Qobuz app slider stays in sync."""
+        if not self.is_running():
+            return
+        self._last_pushed_at = time.monotonic()
+        target = max(0, min(100, int(volume_percent)))
+        self._last_reported_vol = target
+        payload = json.dumps({"volume": target, "mute": bool(muted)}).encode("utf-8")
+
+        def _send() -> None:
+            try:
+                req = urllib.request.Request(
+                    "http://127.0.0.1:8182/api/playback/volume",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=2):
+                    pass
+            except Exception:
+                pass
+
+        threading.Thread(target=_send, daemon=True).start()
 
     def is_enabled(self, cfg: HydraConfig) -> bool:
         return cfg.renderers.qobuz.enabled
@@ -104,6 +137,17 @@ class QobuzRenderer(RendererAdapter):
             self.connection_detail = "Discoverable on LAN"
             _post_qobuz_event({"source": "qobuz", "event": "stop"})
 
+        vol_match = _VOLUME_RE.search(line)
+        if vol_match:
+            vol = max(0, min(100, int(vol_match.group(1))))
+            if (
+                self._on_client_volume is not None
+                and vol != self._last_reported_vol
+                and (time.monotonic() - self._last_pushed_at) > 0.5
+            ):
+                self._last_reported_vol = vol
+                self._on_client_volume(vol)
+
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         qc = cfg.renderers.qobuz
         if alsa_device == "camilladsp":
@@ -115,9 +159,11 @@ class QobuzRenderer(RendererAdapter):
             target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
             alsa_plugin = "plughw" if is_loopback else "hw"
 
-        # Apply device name & ALSA settings via pibuz settings CLI before running daemon
+        # Apply device name, volume mode & ALSA settings via pibuz settings CLI before running daemon
+        volume_mode = "locked" if cfg.volume.mode == "disabled" else "external"
         for key, value in (
             ("qconnect.device_name", qc.device_name),
+            ("qconnect.volume_mode", volume_mode),
             ("audio.backend", "alsa"),
             ("audio.alsa_plugin", alsa_plugin),
             ("audio.device", target_device),
