@@ -187,6 +187,7 @@ async def lifespan(app: FastAPI):
         proc.terminate()
     orchestrator.stop_all()
     root_logger.removeHandler(log_handler)
+    log_handler.close()
 
 
 app = FastAPI(title="Hydra Sound", version="1.0.0", lifespan=lifespan)

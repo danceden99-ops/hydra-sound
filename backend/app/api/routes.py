@@ -458,6 +458,7 @@ async def get_system_logs(request: Request) -> dict:
     return {
         "lines": lines,
         "count": len(lines),
+        "max_entries": handler.max_entries,
         "path": str(handler.log_path),
         "enabled": handler.is_enabled(),
     }

@@ -194,7 +194,7 @@ def test_rolling_500_log_handler(tmp_path: Path) -> None:
     import logging
 
     log_file = tmp_path / "hydrasound.log"
-    handler = Rolling500FileHandler(log_path=log_file, max_entries=500)
+    handler = Rolling500FileHandler(log_path=log_file, max_entries=500, enabled=True, compact_slack=0)
     handler.setFormatter(logging.Formatter("%(message)s"))
     test_logger = logging.getLogger("hydra_test_500")
     test_logger.setLevel(logging.INFO)
@@ -202,6 +202,7 @@ def test_rolling_500_log_handler(tmp_path: Path) -> None:
     try:
         for i in range(600):
             test_logger.info("entry-%d", i)
+        handler.flush()
         lines = log_file.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 500
         assert lines[0] == "entry-100"

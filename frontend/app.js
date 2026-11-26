@@ -631,7 +631,7 @@ async function loadSystemLogs() {
   const data = await api("/api/system/logs");
   const statusLabel = data.enabled ? "Enabled" : "Disabled";
   $("sys-logs-meta").textContent =
-    `Logging: ${statusLabel} — Showing ${data.count} / 500 entries (${data.path || "log file"})`;
+    `Logging: ${statusLabel} — Showing ${data.count} / ${data.max_entries || 2000} entries (${data.path || "log file"})`;
   const out = $("sys-logs-output");
   out.textContent = data.lines.length ? data.lines.join("\n") : "(Log is empty)";
   out.scrollTop = out.scrollHeight;
