@@ -144,16 +144,21 @@ class CamillaDSPManager:
     def start(self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig) -> None:
         self.stop()
         self.write_config(audio_cfg, volume_cfg)
+        cmd = [
+            "camilladsp",
+            "-p",
+            str(CAMILLA_WS_PORT),
+            "-o",
+            "/var/log/hydrasound-camilladsp.log",
+        ]
+        if volume_cfg.mode == "software" or (
+            volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed
+        ):
+            cmd.extend(["--gain", "-80.0", "--mute"])
+        cmd.append(str(self.config_path))
         try:
             self._proc = subprocess.Popen(
-                [
-                    "camilladsp",
-                    "-p",
-                    str(CAMILLA_WS_PORT),
-                    "-o",
-                    "/var/log/hydrasound-camilladsp.log",
-                    str(self.config_path),
-                ],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )

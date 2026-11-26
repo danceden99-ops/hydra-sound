@@ -42,6 +42,7 @@ def _classify_device(card_id: str, card_name: str, dev_name: str) -> str:
             return "usb"
     if "headphones" in combined or "bcm2835" in combined or "analog" in combined:
         return "analog"
+    return "other"
 
 
 def resolve_card_id(card: str) -> str:
@@ -68,7 +69,6 @@ def format_named_alsa_device(alsa_device: str, is_hdmi: bool = False) -> str:
     dev = parts[1].strip()
     prefix = "plughw" if is_hdmi else "hw"
     return f"{prefix}:CARD={card_id},DEV={dev}"
-    return "other"
 
 
 def list_mixers(card: int) -> List[str]:

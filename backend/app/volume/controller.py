@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 import subprocess
 from typing import Callable, Optional
 
@@ -44,6 +45,12 @@ class VolumeController:
 
     def clamp_volume(self, value: int, cfg: VolumeConfig) -> int:
         max_allowed = max(0, min(100, int(cfg.max_volume)))
+        hard_cap_env = os.environ.get("HYDRA_HARD_MAX_VOLUME")
+        if hard_cap_env is not None:
+            try:
+                max_allowed = min(max_allowed, max(0, min(100, int(hard_cap_env))))
+            except ValueError:
+                pass
         return max(0, min(max_allowed, int(value)))
 
     async def apply_power_on(

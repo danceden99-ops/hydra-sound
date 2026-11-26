@@ -29,7 +29,7 @@ class VolumeConfig(BaseModel):
     mode: Literal["disabled", "hardware", "software"] = "disabled"
     curve: Literal["logarithmic", "linear"] = "logarithmic"
     power_on_volume: int = Field(default=35, ge=0, le=100)
-    max_volume: int = Field(default=100, ge=1, le=100)
+    max_volume: int = Field(default=70, ge=1, le=100)
     step_size: int = Field(default=2, ge=1, le=20)
     current_volume: int = Field(default=35, ge=0, le=100)
     muted: bool = False

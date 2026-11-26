@@ -118,6 +118,9 @@ async def update_audio_config(payload: AudioOutputConfig, request: Request) -> d
     cfg.audio = payload
     if device_changed:
         cfg.volume.usb_disabled_confirmed = False
+        cfg.volume.current_volume = state.volume_controller.clamp_volume(
+            cfg.volume.power_on_volume, cfg.volume
+        )
     state.config_store.save(cfg)
     state.orchestrator.start_enabled_renderers(cfg)
     await state.volume_controller.apply(cfg.audio, cfg.volume)
