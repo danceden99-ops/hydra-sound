@@ -275,23 +275,30 @@ class CamillaDSPManager:
         volume_cfg: VolumeConfig,
         asound_conf_path: Path = Path("/etc/asound.conf"),
     ) -> None:
-        """Configure alsa_cdsp template and /etc/asound.conf for native-rate DSP."""
+        """Configure alsa_cdsp template, config_cmd script, and /etc/asound.conf."""
         self.stop()
         self._cdsp_mode = True
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(
+        self.template_path.parent.mkdir(parents=True, exist_ok=True)
+        self.template_path.write_text(
             self.render_cdsp_template(audio_cfg, volume_cfg), encoding="utf-8"
         )
         if not self.statefile_path.exists():
             self.write_statefile(-80.0, True)
+
+        cfg_cmd = Path(__file__).resolve().parents[3] / "scripts" / "camilla_cdsp_config.sh"
+        try:
+            if cfg_cmd.exists():
+                cfg_cmd.chmod(0o755)
+        except Exception:
+            pass
 
         asound_body = (
             'defaults.pcm.rate_converter "speexrate_best"\n\n'
             "pcm.camilladsp {\n"
             "    type cdsp\n"
             '    cpath "/usr/local/bin/camilladsp"\n'
+            f'    config_cmd "{cfg_cmd}"\n'
             f'    config_out "{self.config_path}"\n'
-            "    config_cdsp 1\n"
             "    channels 2\n"
             "    rates = [ 44100 48000 88200 96000 176400 192000 352800 384000 ]\n"
             f'    cargs [ -p "{CAMILLA_WS_PORT}" -a "127.0.0.1" '
