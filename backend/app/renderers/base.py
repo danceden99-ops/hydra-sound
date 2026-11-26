@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -34,6 +35,9 @@ class RendererAdapter(ABC):
         self._proc: Optional[subprocess.Popen] = None
         self.connection_status: str = "stopped"  # stopped | advertising | connected | error
         self.connection_detail: str = "Not running"
+        self._stopping: bool = False
+        self._last_cfg: Optional[HydraConfig] = None
+        self._last_alsa_device: str = "hw:0,0"
 
     @abstractmethod
     def is_enabled(self, cfg: HydraConfig) -> bool:
@@ -45,6 +49,9 @@ class RendererAdapter(ABC):
 
     def start(self, cfg: HydraConfig, alsa_device: str) -> bool:
         self.stop()
+        self._stopping = False
+        self._last_cfg = cfg
+        self._last_alsa_device = alsa_device
         if not self.is_enabled(cfg):
             self.connection_status = "disabled"
             self.connection_detail = "Disabled"
@@ -92,6 +99,12 @@ class RendererAdapter(ABC):
                     logger.warning("[%s] %s", self.meta.id, clean)
         except Exception:
             pass
+        if not self._stopping and self._last_cfg is not None:
+            code = proc.poll()
+            logger.warning("[%s] exited (code=%s); restarting in 2s.", self.meta.id, code)
+            time.sleep(2.0)
+            if not self._stopping and self._last_cfg is not None:
+                self.start(self._last_cfg, self._last_alsa_device)
 
     def _update_connection_state(self, line: str) -> None:
         """Infer live login/pairing/error state from renderer output."""
@@ -113,6 +126,7 @@ class RendererAdapter(ABC):
             self.connection_detail = line[:120]
 
     def stop(self) -> None:
+        self._stopping = True
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
             try:
