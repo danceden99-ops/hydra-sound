@@ -248,7 +248,20 @@ class CamillaDSPManager:
             return
         if self._proc and self._proc.poll() is not None:
             self.running = False
-            logger.warning("CamillaDSP process exited; cannot apply volume %.2f dB", db)
+            tail = ""
+            log_path = Path("/var/log/hydrasound-camilladsp.log")
+            if log_path.is_file():
+                try:
+                    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                    err_lines = [ln for ln in lines[-10:] if "ERROR" in ln or "Playback" in ln]
+                    tail = " | ".join(err_lines or lines[-3:])
+                except Exception:
+                    pass
+            logger.warning(
+                "CamillaDSP process exited; cannot apply volume %.2f dB%s",
+                db,
+                f" ({tail})" if tail else "",
+            )
             return
         uri = f"ws://127.0.0.1:{CAMILLA_WS_PORT}"
         last_exc: Optional[Exception] = None

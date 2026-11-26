@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -70,6 +71,7 @@ class SpotifyRenderer(RendererAdapter):
         self._ws_thread: Optional[threading.Thread] = None
         self._on_client_volume: Optional[Callable[[int], None]] = None
         self._last_pushed_at: float = 0.0
+        self._go_librespot_ok: Optional[tuple[float, bool]] = None
 
     def set_volume_callback(self, cb: Optional[Callable[[int], None]]) -> None:
         """Register callback invoked when the Spotify app changes volume."""
@@ -79,7 +81,28 @@ class SpotifyRenderer(RendererAdapter):
         return cfg.renderers.spotify.enabled
 
     def _has_go_librespot(self) -> bool:
-        return shutil.which("go-librespot") is not None
+        now = time.monotonic()
+        if self._go_librespot_ok and now - self._go_librespot_ok[0] < 60.0:
+            return self._go_librespot_ok[1]
+        if shutil.which("go-librespot") is None:
+            self._go_librespot_ok = (now, False)
+            return False
+        try:
+            res = subprocess.run(
+                ["go-librespot", "-h"], capture_output=True, text=True, timeout=2
+            )
+            err = (res.stderr or "") + (res.stdout or "")
+            ok = res.returncode != 127 and "error while loading shared libraries" not in err
+            if not ok:
+                logger.warning(
+                    "go-librespot binary cannot start (%s); falling back to librespot.",
+                    err.strip().splitlines()[0] if err.strip() else res.returncode,
+                )
+        except Exception as exc:
+            logger.warning("go-librespot check failed (%s); falling back to librespot.", exc)
+            ok = False
+        self._go_librespot_ok = (now, ok)
+        return ok
 
     def _write_go_librespot_config(self, cfg: HydraConfig, target_device: str) -> Path:
         sc = cfg.renderers.spotify
