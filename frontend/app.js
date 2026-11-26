@@ -33,7 +33,9 @@ function formatStream(rate, bits, fmt) {
 function updateLiveUI(data) {
   const { stream, volume, system, dsp_active } = data;
   $("cpu-load").textContent = `${system.cpu_percent}%`;
-  $("cpu-temp").textContent = system.temperature_c !== null ? `${system.temperature_c}°C` : "N/A";
+  $("cpu-temp").textContent = system.temperature_c !== null
+    ? `${((system.temperature_c * 9) / 5 + 32).toFixed(1)}°F`
+    : "N/A";
 
   const badge = $("pipeline-badge");
   badge.textContent = dsp_active ? "DSP (32-BIT+)" : "BIT-PERFECT";
