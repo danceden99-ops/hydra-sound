@@ -25,6 +25,7 @@ class AudioOutputConfig(BaseModel):
         "SincMedium",
         "SincFast",
     ] = "SincVeryHigh"
+    dither_24bit_spdif: bool = False
 
 
 class VolumeConfig(BaseModel):

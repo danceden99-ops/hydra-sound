@@ -424,6 +424,21 @@ def test_parse_playback_capabilities_xmos() -> None:
     assert 96000 in caps["supported_rates"]
 
 
+def test_24bit_spdif_dither_option() -> None:
+    audio = AudioOutputConfig(
+        device_id="hw:4,0",
+        resample_enabled=True,
+        resample_rate=96000,
+        resample_bit_depth=32,
+        dither_24bit_spdif=True,
+    )
+    vol = VolumeConfig(mode="software", max_volume=70)
+    cfg = build_camilladsp_config(audio, vol, capture_rate=44100)
+    assert cfg["devices"]["playback"]["format"] == "S32_LE"
+    assert cfg["filters"]["dsp_dither"]["parameters"]["bits"] == 24
+
+
+
 
 
 

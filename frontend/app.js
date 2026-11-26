@@ -209,6 +209,7 @@ async function loadInitialConfig() {
   devSel.value = cfg.audio.device_id;
 
   $("resample-enabled").checked = cfg.audio.resample_enabled;
+  $("dither-24bit-spdif").checked = Boolean(cfg.audio.dither_24bit_spdif);
   $("resample-rate").value = cfg.audio.resample_rate;
   $("resample-bits").value = cfg.audio.resample_bit_depth;
   $("resample-algo").value = cfg.audio.resample_algorithm;
@@ -305,6 +306,7 @@ $("save-audio").addEventListener("click", async () => {
     device_name: devSel.options[devSel.selectedIndex]?.textContent || "DAC",
     bit_perfect: !$("resample-enabled").checked,
     resample_enabled: $("resample-enabled").checked,
+    dither_24bit_spdif: $("dither-24bit-spdif").checked,
     resample_rate: Number($("resample-rate").value),
     resample_bit_depth: Number($("resample-bits").value),
     resample_algorithm: $("resample-algo").value,

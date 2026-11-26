@@ -214,10 +214,9 @@ def build_camilladsp_config(
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["dsp_limiter"]})
 
-    if (audio_cfg.resample_enabled or volume_cfg.mode == "software") and target_format in (
-        "S16_LE",
-        "S24_3_LE",
-        "S24_4_RJ_LE",
+    if (audio_cfg.resample_enabled or volume_cfg.mode == "software") and (
+        target_format in ("S16_LE", "S24_3_LE", "S24_4_RJ_LE")
+        or audio_cfg.dither_24bit_spdif
     ):
         dither_bits = 16 if target_format == "S16_LE" else 24
         filters["dsp_dither"] = {
