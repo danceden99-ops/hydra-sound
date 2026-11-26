@@ -54,6 +54,16 @@ function updateLiveUI(data) {
 
   $("track-title").textContent = stream.title || (stream.active_source ? "Streaming Active" : "Waiting for stream…");
   $("track-artist").textContent = [stream.artist, stream.album].filter(Boolean).join(" — ") || "Discoverable on LAN";
+  const art = $("track-art");
+  if (art) {
+    if (stream.artwork_url) {
+      art.src = stream.artwork_url;
+      art.hidden = false;
+    } else {
+      art.hidden = true;
+      art.removeAttribute("src");
+    }
+  }
 
   $("incoming-format").textContent = formatStream(stream.incoming_rate, stream.incoming_bit_depth, stream.incoming_format);
   $("outgoing-format").textContent = formatStream(stream.outgoing_rate, stream.outgoing_bit_depth, stream.outgoing_format);

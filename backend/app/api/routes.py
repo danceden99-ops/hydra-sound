@@ -10,7 +10,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from app.audio.alsa import get_device_capabilities, list_audio_devices
+from app.audio.alsa import (
+    get_device_capabilities,
+    get_usb_device_identity,
+    invalidate_usb_cache,
+    list_audio_devices,
+)
 from app.config import (
     AudioOutputConfig,
     HydraConfig,
@@ -43,6 +48,7 @@ class RendererEventRequest(BaseModel):
     artist: str = ""
     title: str = ""
     album: str = ""
+    artwork_url: str = ""
     incoming_format: str = ""
     incoming_rate: Optional[int] = None
     incoming_bit_depth: Optional[int] = None
@@ -116,7 +122,18 @@ async def update_audio_config(payload: AudioOutputConfig, request: Request) -> d
         or cfg.audio.device_name != payload.device_name
     )
     cfg.audio = payload
+    if payload.device_id.startswith("hw:"):
+        try:
+            card_idx = payload.device_id.split(":", 1)[1].split(",", 1)[0]
+            card_id, serial = get_usb_device_identity(card_idx)
+            if card_id and not cfg.audio.alsa_card_id:
+                cfg.audio.alsa_card_id = card_id
+            if serial and not cfg.audio.usb_serial:
+                cfg.audio.usb_serial = serial
+        except Exception:
+            pass
     if device_changed:
+        invalidate_usb_cache()
         cfg.volume.usb_disabled_confirmed = False
         cfg.volume.current_volume = state.volume_controller.clamp_volume(
             cfg.volume.power_on_volume, cfg.volume
@@ -235,6 +252,7 @@ async def internal_renderer_event(payload: RendererEventRequest, request: Reques
         artist=payload.artist,
         title=payload.title,
         album=payload.album,
+        artwork_url=payload.artwork_url,
         incoming_format=payload.incoming_format,
         incoming_rate=payload.incoming_rate,
         incoming_bit_depth=payload.incoming_bit_depth,

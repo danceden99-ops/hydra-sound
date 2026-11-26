@@ -138,6 +138,64 @@ def list_audio_devices() -> List[AudioDevice]:
 _USB_CACHE: Dict[str, Tuple[float, bool]] = {}
 
 
+def invalidate_usb_cache() -> None:
+    """Clear the cached USB device classification map (e.g. after hotplug)."""
+    _USB_CACHE.clear()
+
+
+def get_usb_device_identity(card: str | int) -> Tuple[str, str]:
+    """Return (alsa_card_id, usb_serial) for a given ALSA card index."""
+    card_str = str(card).strip()
+    alsa_card_id = resolve_card_id(card_str)
+    if alsa_card_id == card_str:
+        alsa_card_id = ""
+    usb_serial = ""
+    sys_card = Path(f"/sys/class/sound/card{card_str}/device")
+    try:
+        resolved = sys_card.resolve()
+        for parent in [resolved, *resolved.parents]:
+            serial_path = parent / "serial"
+            if serial_path.is_file():
+                usb_serial = serial_path.read_text(encoding="utf-8").strip()
+                break
+            if parent.name == "usb" or parent == Path("/sys"):
+                break
+    except Exception:
+        pass
+    return alsa_card_id, usb_serial
+
+
+def find_device_by_identity(
+    alsa_card_id: str = "",
+    usb_serial: str = "",
+    device_name: str = "",
+    preferred_dev: int = 0,
+) -> Optional[str]:
+    """Locate current `hw:X,Y` for a DAC using stable USB serial, card ID, or name."""
+    devices = list_audio_devices()
+    if usb_serial:
+        for dev in devices:
+            _, ser = get_usb_device_identity(dev.card)
+            if ser and ser == usb_serial and dev.device == preferred_dev:
+                return dev.id
+        for dev in devices:
+            _, ser = get_usb_device_identity(dev.card)
+            if ser and ser == usb_serial:
+                return dev.id
+    if alsa_card_id:
+        for dev in devices:
+            if resolve_card_id(str(dev.card)) == alsa_card_id and dev.device == preferred_dev:
+                return dev.id
+        for dev in devices:
+            if resolve_card_id(str(dev.card)) == alsa_card_id:
+                return dev.id
+    if device_name:
+        for dev in devices:
+            if dev.name == device_name and dev.device == preferred_dev:
+                return dev.id
+    return None
+
+
 def is_usb_audio_device(device_id: str, device_name: str = "") -> bool:
     """Return True if the selected ALSA output is a USB audio device (cached 10s)."""
     now = time.monotonic()

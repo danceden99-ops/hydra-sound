@@ -12,7 +12,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
+from app.audio.alsa import get_usb_device_identity
 from app.audio.camilladsp import CamillaDSPManager
+from app.audio.hotplug import USBHotplugMonitor, reconcile_audio_device_identity
 from app.audio.pipeline import AudioPipelineManager
 from app.config import ConfigStore
 from app.ir.controller import IRManager
@@ -51,6 +53,9 @@ async def lifespan(app: FastAPI):
     )
     ir_manager = IRManager()
     network_manager = NetworkManager()
+    hotplug_monitor = USBHotplugMonitor()
+
+    reconcile_audio_device_identity(cfg)
 
     app.state.config_store = config_store
     app.state.log_handler = log_handler
@@ -60,6 +65,7 @@ async def lifespan(app: FastAPI):
     app.state.volume_controller = volume_controller
     app.state.ir_manager = ir_manager
     app.state.network_manager = network_manager
+    app.state.hotplug_monitor = hotplug_monitor
 
     orchestrator.start_enabled_renderers(cfg)
     await volume_controller.apply_power_on(cfg.audio, cfg.volume)
@@ -82,8 +88,52 @@ async def lifespan(app: FastAPI):
         asyncio.get_running_loop(), config_store.get, _handle_ir_action
     )
 
+    async def _handle_usb_disconnect(cur_cfg) -> None:
+        orchestrator.stop_all()
+
+    async def _handle_usb_reconnect(cur_cfg, new_device_id: str) -> None:
+        cur_cfg.audio.device_id = new_device_id
+        try:
+            card_idx = new_device_id.split(":", 1)[1].split(",", 1)[0]
+            card_id, serial = get_usb_device_identity(card_idx)
+            if card_id:
+                cur_cfg.audio.alsa_card_id = card_id
+            if serial:
+                cur_cfg.audio.usb_serial = serial
+        except Exception:
+            pass
+        cur_cfg.volume.usb_disabled_confirmed = False
+        cur_cfg.volume.current_volume = volume_controller.clamp_volume(
+            cur_cfg.volume.power_on_volume, cur_cfg.volume
+        )
+        config_store.save(cur_cfg)
+        orchestrator.start_enabled_renderers(cur_cfg)
+        await volume_controller.apply(cur_cfg.audio, cur_cfg.volume)
+
+    hotplug_monitor.start(
+        asyncio.get_running_loop(),
+        config_store.get,
+        _handle_usb_disconnect,
+        _handle_usb_reconnect,
+    )
+
+    loop = asyncio.get_running_loop()
+    spotify_renderer = orchestrator.renderers.get("spotify")
+    if hasattr(spotify_renderer, "set_volume_callback"):
+        def _on_spotify_volume(pct: int) -> None:
+            cur_cfg = config_store.get()
+            if cur_cfg.volume.mode == "disabled":
+                return
+            async def _apply() -> None:
+                await volume_controller.set_volume(pct, cur_cfg.audio, cur_cfg.volume)
+                config_store.save(cur_cfg)
+            asyncio.run_coroutine_threadsafe(_apply(), loop)
+
+        spotify_renderer.set_volume_callback(_on_spotify_volume)
+
     yield
 
+    hotplug_monitor.stop()
     ir_manager.stop_listener()
     orchestrator.stop_all()
     root_logger.removeHandler(log_handler)

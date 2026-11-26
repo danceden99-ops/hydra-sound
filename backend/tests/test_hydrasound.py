@@ -208,3 +208,77 @@ def test_rolling_500_log_handler(tmp_path: Path) -> None:
         assert lines[-1] == "entry-599"
     finally:
         test_logger.removeHandler(handler)
+
+
+def test_usb_identity_reconciliation(monkeypatch) -> None:
+    from app.audio import alsa, hotplug
+
+    fake_devices = [
+        alsa.AudioDevice(
+            id="hw:5,0",
+            card=5,
+            device=0,
+            name="SMSL USB AUDIO",
+            description="SMSL USB AUDIO — USB Audio (hw:5,0)",
+            device_type="usb",
+            mixers=["SMSL USB AUDIO "],
+        )
+    ]
+    monkeypatch.setattr(alsa, "list_audio_devices", lambda: fake_devices)
+    monkeypatch.setattr(alsa, "get_usb_device_identity", lambda c: ("AUDIO", "SMSL-SER-123"))
+    monkeypatch.setattr(alsa, "resolve_card_id", lambda c: "AUDIO" if str(c) == "5" else str(c))
+    monkeypatch.setattr(hotplug, "get_usb_device_identity", lambda c: ("AUDIO", "SMSL-SER-123"))
+
+    cfg = HydraConfig()
+    cfg.audio.device_id = "hw:4,0"
+    cfg.audio.device_name = "SMSL USB AUDIO"
+    cfg.audio.alsa_card_id = "AUDIO"
+    cfg.audio.usb_serial = "SMSL-SER-123"
+
+    changed = hotplug.reconcile_audio_device_identity(cfg)
+    assert changed is True
+    assert cfg.audio.device_id == "hw:5,0"
+
+
+def test_spotify_go_librespot_and_fallback(tmp_path: Path, monkeypatch) -> None:
+    from app.renderers import spotify as sp_mod
+
+    monkeypatch.setattr(sp_mod, "GO_LIBRESPOT_CONFIG_DIR", tmp_path / "go-librespot")
+    renderer = sp_mod.SpotifyRenderer()
+    cfg = HydraConfig()
+
+    # Fallback to librespot when go-librespot binary is absent
+    monkeypatch.setattr(sp_mod.shutil, "which", lambda name: None)
+    cmd_fallback = renderer.build_command(cfg, "hw:1,0")
+    assert cmd_fallback[0] == "librespot"
+
+    # Primary go-librespot mode when binary is present
+    monkeypatch.setattr(
+        sp_mod.shutil, "which", lambda name: "/usr/local/bin/go-librespot" if name == "go-librespot" else None
+    )
+    cmd_go = renderer.build_command(cfg, "hw:4,0")
+    assert cmd_go[0] == "go-librespot"
+    assert (tmp_path / "go-librespot" / "config.yml").is_file()
+
+    # Bidirectional volume event from Spotify app
+    received: list[int] = []
+    renderer.set_volume_callback(lambda pct: received.append(pct))
+    renderer._handle_ws_event({"type": "volume", "data": {"value": 42, "max": 100}})
+    assert received == [42]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stores_artwork_url() -> None:
+    cfg = HydraConfig()
+    orch = StreamOrchestrator(AudioPipelineManager(CamillaDSPManager()))
+    res = await orch.handle_renderer_event(
+        "spotify",
+        "metadata",
+        cfg,
+        title="Track X",
+        artist="Artist Y",
+        artwork_url="https://i.scdn.co/image/test123",
+    )
+    assert res["accepted"] is True
+    assert orch.stream.artwork_url == "https://i.scdn.co/image/test123"
+

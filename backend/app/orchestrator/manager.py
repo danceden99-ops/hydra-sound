@@ -32,6 +32,7 @@ class StreamInfo:
     artist: str = ""
     title: str = ""
     album: str = ""
+    artwork_url: str = ""
     incoming_format: str = ""
     incoming_rate: Optional[int] = None
     incoming_bit_depth: Optional[int] = None
@@ -82,6 +83,7 @@ class StreamOrchestrator:
         artist: str = "",
         title: str = "",
         album: str = "",
+        artwork_url: str = "",
         incoming_format: str = "",
         incoming_rate: Optional[int] = None,
         incoming_bit_depth: Optional[int] = None,
@@ -140,6 +142,8 @@ class StreamOrchestrator:
                 self.stream.title = title
             if album:
                 self.stream.album = album
+            if artwork_url:
+                self.stream.artwork_url = artwork_url
             if incoming_format:
                 self.stream.incoming_format = incoming_format
             if incoming_rate:

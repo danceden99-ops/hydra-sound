@@ -15,28 +15,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ALSA build dependencies
+      - name: Install ALSA and Ogg/Vorbis build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config build-essential
+          sudo apt-get install -y libasound2-dev libogg-dev libvorbis-dev pkg-config build-essential
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build librespot (Spotify Connect)
+      - name: Install Go toolchain
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Build librespot (Spotify Connect fallback)
         run: |
           cargo install --git https://github.com/librespot-org/librespot --branch dev --locked --no-default-features --features "alsa-backend,rustls-tls-native-roots,with-libmdns" --root ./dist
+
+      - name: Build go-librespot (Spotify Connect primary)
+        run: |
+          git clone --depth 1 https://github.com/devgianlu/go-librespot /tmp/go-librespot
+          cd /tmp/go-librespot
+          go build -o "${GITHUB_WORKSPACE}/dist/bin/go-librespot" ./cmd/daemon
 
       - name: Build pibuz (Qobuz Connect)
         run: |
           cargo install --git https://github.com/PhilipVinc/pibuz --root ./dist
 
-      - name: Package ARM64 binaries
+      - name: Package ARM64 binaries & SHA256 checksum
         run: |
-          tar -czvf hydra-sound-arm64-binaries.tar.gz -C ./dist/bin librespot pibuz
+          tar -czvf hydra-sound-arm64-binaries.tar.gz -C ./dist/bin librespot go-librespot pibuz
+          sha256sum hydra-sound-arm64-binaries.tar.gz > hydra-sound-arm64-binaries.tar.gz.sha256
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: hydra-sound-arm64-binaries.tar.gz
+          files: |
+            hydra-sound-arm64-binaries.tar.gz
+            hydra-sound-arm64-binaries.tar.gz.sha256
           generate_release_notes: true

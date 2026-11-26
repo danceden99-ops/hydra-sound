@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Modular installer/updater for Spotify Connect (librespot)
+# Modular installer/updater for Spotify Connect (go-librespot + librespot fallback)
 ASSET_URL="https://github.com/danceden99-ops/hydra-sound/releases/latest/download/hydra-sound-arm64-binaries.tar.gz"
+SHA_URL="${ASSET_URL}.sha256"
 
 if [[ "${PREFER_SOURCE:-0}" != "1" ]] && [[ "$(uname -m)" == "aarch64" ]]; then
   TMP_DIR=$(mktemp -d)
-  if curl -fsSL "$ASSET_URL" -o "$TMP_DIR/bins.tar.gz"; then
-    tar -xzf "$TMP_DIR/bins.tar.gz" -C /usr/local/bin librespot
-    chmod +x /usr/local/bin/librespot
+  if curl -fsSL "$ASSET_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz"; then
+    if curl -fsSL "$SHA_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz.sha256" 2>/dev/null; then
+      (cd "$TMP_DIR" && sha256sum -c hydra-sound-arm64-binaries.tar.gz.sha256)
+    fi
+    tar -xzf "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz" -C /usr/local/bin
+    chmod +x /usr/local/bin/librespot /usr/local/bin/go-librespot 2>/dev/null || true
     rm -rf "$TMP_DIR"
-    echo "Installed prebuilt librespot binary."
+    echo "Installed prebuilt Spotify Connect binaries."
     exit 0
   fi
   rm -rf "$TMP_DIR"

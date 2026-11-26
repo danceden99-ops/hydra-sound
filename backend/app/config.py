@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 class AudioOutputConfig(BaseModel):
     device_id: str = "hw:0,0"
     device_name: str = "Default Audio Device"
+    alsa_card_id: str = ""
+    usb_serial: str = ""
     bit_perfect: bool = True
     resample_enabled: bool = False
     resample_rate: int = 96000
