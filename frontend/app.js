@@ -386,7 +386,14 @@ $("save-volume").addEventListener("click", async () => {
     hardware_mixer_name: $("vol-hw-mixer").value || "PCM",
     usb_disabled_confirmed: confirmed,
   });
-  if (res.usb_safety_muted) {
+  if (res.fallback_to_software) {
+    $("vol-mode").value = res.volume?.mode || "software";
+    currentVolumeMode = $("vol-mode").value;
+    showToast("No hardware mixer available — switched to Software DSP volume control");
+    alert(
+      `Hardware volume mode is not supported by this audio device:\n\n${res.hardware_error || "No usable ALSA playback mixer found."}\n\nHydra Sound automatically switched to Software DSP (CamillaDSP) volume control so your volume limit remains protected.`
+    );
+  } else if (res.usb_safety_muted) {
     showToast("Output muted until USB 0 dB pass-through is confirmed");
   } else {
     showToast("Volume settings saved");

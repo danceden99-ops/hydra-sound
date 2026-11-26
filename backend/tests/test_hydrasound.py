@@ -471,7 +471,7 @@ def test_hardware_mode_falls_back_to_software_on_missing_mixer(monkeypatch) -> N
 
     monkeypatch.setattr(vol_mod, "list_mixers", lambda card: [])
     with TestClient(app) as client:
-        res = client.post("/api/volume/config", json={"mode": "hardware"})
+        res = client.put("/api/config/volume", json={"mode": "hardware"})
         assert res.status_code == 200
         body = res.json()
         assert body["volume"]["mode"] == "software"
