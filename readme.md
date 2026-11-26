@@ -137,12 +137,21 @@ pytest backend/tests -v
 
 Hydra Sound would not be possible without the extraordinary work of the open-source audio community. We extend our sincere gratitude to the authors, maintainers, and contributors of the core streaming and DSP projects that power Hydra Sound:
 
-- **[librespot](https://github.com/librespot-org/librespot)** (`librespot-org/librespot`) — Open-source Spotify Connect client library.
+- **[go-librespot](https://github.com/devgianlu/go-librespot)** (`devgianlu/go-librespot`) — Spotify Connect daemon with REST/WebSocket metadata, album artwork, and bidirectional volume sync.
+- **[librespot](https://github.com/librespot-org/librespot)** (`librespot-org/librespot`) — Open-source Spotify Connect client library (fallback).
 - **[pibuz](https://github.com/PhilipVinc/pibuz)** (`PhilipVinc/pibuz`) — Bit-perfect Qobuz Connect headless receiver.
 - **[shairport-sync](https://github.com/mikebrady/shairport-sync)** (`mikebrady/shairport-sync`) — High-precision Apple AirPlay audio player.
 - **[gmrender-resurrect](https://github.com/hzeller/gmrender-resurrect)** (`hzeller/gmrender-resurrect`) — Lightweight DLNA / UPnP media renderer.
 - **[shanocast](https://github.com/rgerganov/shanocast)** (`rgerganov/shanocast`) — Open-source Google Cast receiver implementation.
 - **[CamillaDSP](https://github.com/HEnquist/camilladsp)** (`HEnquist/camilladsp`) — High-precision 64-bit floating-point DSP and resampling engine.
+
+### Supporting Libraries & Tooling
+
+- **[pyudev](https://github.com/pyudev/pyudev)** — Linux `libudev` bindings powering USB DAC hotplug detection and stable serial/card-ID identity.
+- **[FastAPI](https://fastapi.tiangolo.com/)**, **[Uvicorn](https://www.uvicorn.org/)**, & **[Pydantic](https://docs.pydantic.dev/)** — Async REST/WebSocket API, static Web GUI serving, and typed configuration validation.
+- **[websockets](https://websockets.readthedocs.io/)**, **[httpx](https://www.python-httpx.org/)**, **[PyYAML](https://pyyaml.org/)**, & **[psutil](https://github.com/giampaolo/psutil)** — CamillaDSP/`go-librespot` WebSocket control, GitHub release/update queries, YAML config generation, and system telemetry.
+- **[alsa-plugins](https://github.com/alsa-project/alsa-plugins)** (`speexrate_best`) — High-quality ALSA rate conversion fallback when ALSA `plug` is engaged.
+- **[Ruff](https://docs.astral.sh/ruff/)**, **[ShellCheck](https://www.shellcheck.net/)**, & **[pytest](https://docs.pytest.org/)** — Python/shell linting and automated unit testing in CI.
 
 Thank you to everyone who dedicates their time to building and maintaining these open-source tools for the audiophile and Linux communities.
 
