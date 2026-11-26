@@ -47,9 +47,15 @@ jobs:
         run: |
           cargo install --git https://github.com/PhilipVinc/pibuz --root ./dist
 
+      - name: Build alsa_cdsp ALSA plugin (Debian Trixie ABI)
+        run: |
+          git clone --depth 1 https://github.com/scripple/alsa_cdsp /tmp/alsa_cdsp
+          docker run --rm -v /tmp/alsa_cdsp:/src -v "${GITHUB_WORKSPACE}/dist/bin:/out" -w /src debian:trixie-slim \
+            bash -c "apt-get update && apt-get install -y --no-install-recommends gcc make libc6-dev libasound2-dev && make && cp libasound_module_pcm_cdsp.so /out/libasound_module_pcm_cdsp.so"
+
       - name: Package ARM64 binaries & SHA256 checksum
         run: |
-          tar -czvf hydra-sound-arm64-binaries.tar.gz -C ./dist/bin librespot go-librespot go-librespot.version pibuz
+          tar -czvf hydra-sound-arm64-binaries.tar.gz -C ./dist/bin librespot go-librespot go-librespot.version pibuz libasound_module_pcm_cdsp.so
           sha256sum hydra-sound-arm64-binaries.tar.gz > hydra-sound-arm64-binaries.tar.gz.sha256
 
       - name: Upload to GitHub Release

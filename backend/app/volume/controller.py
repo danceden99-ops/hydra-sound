@@ -117,7 +117,8 @@ class VolumeController:
             self._apply_hardware_alsa(audio_cfg.device_id, vol_cfg)
         elif vol_cfg.mode == "software":
             self.hardware_error = None
-            max_db = percent_to_db(vol_cfg.max_volume, vol_cfg.curve)
+            max_allowed = get_effective_max_volume(vol_cfg)
+            max_db = percent_to_db(max_allowed, vol_cfg.curve)
             db = min(percent_to_db(vol_cfg.current_volume, vol_cfg.curve), max_db)
             await self.camilla.set_volume_db(db, muted=vol_cfg.muted)
 

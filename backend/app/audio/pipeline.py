@@ -11,12 +11,13 @@ from __future__ import annotations
 import logging
 
 from app.audio.alsa import is_usb_audio_device
-from app.audio.camilladsp import CamillaDSPManager
+from app.audio.camilladsp import CamillaDSPManager, has_alsa_cdsp
 from app.config import AudioOutputConfig, VolumeConfig
 
 logger = logging.getLogger(__name__)
 
 LOOPBACK_PLAYBACK_DEVICE = "plughw:CARD=Loopback,DEV=0"
+ALSA_CDSP_DEVICE = "camilladsp"
 
 
 class AudioPipelineManager:
@@ -47,7 +48,7 @@ class AudioPipelineManager:
         self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig
     ) -> str:
         if self.requires_dsp(audio_cfg, volume_cfg):
-            return LOOPBACK_PLAYBACK_DEVICE
+            return ALSA_CDSP_DEVICE if has_alsa_cdsp() else LOOPBACK_PLAYBACK_DEVICE
         return audio_cfg.device_id
 
     def apply(
@@ -58,8 +59,19 @@ class AudioPipelineManager:
     ) -> str:
         """Apply current audio & volume config; return ALSA device for renderers."""
         if self.requires_dsp(audio_cfg, volume_cfg):
+            if has_alsa_cdsp():
+                logger.info(
+                    "DSP mode active via alsa_cdsp (software_vol=%s, resample=%s -> %sHz/%sbit)",
+                    volume_cfg.mode == "software",
+                    audio_cfg.resample_enabled,
+                    audio_cfg.resample_rate,
+                    audio_cfg.resample_bit_depth,
+                )
+                self.camilla.configure_alsa_cdsp(audio_cfg, volume_cfg)
+                return ALSA_CDSP_DEVICE
+
             logger.info(
-                "DSP mode active (software_vol=%s, resample=%s -> %sHz/%sbit, capture=%sHz)",
+                "DSP mode active via Loopback (software_vol=%s, resample=%s -> %sHz/%sbit, capture=%sHz)",
                 volume_cfg.mode == "software",
                 audio_cfg.resample_enabled,
                 audio_cfg.resample_rate,

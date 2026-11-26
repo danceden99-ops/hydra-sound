@@ -31,6 +31,18 @@ def _default_camilla_config_path() -> Path:
 
 CAMILLA_WS_PORT = 1234
 
+ALSA_CDSP_PLUGIN_PATHS = (
+    Path("/usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_pcm_cdsp.so"),
+    Path("/usr/lib/alsa-lib/libasound_module_pcm_cdsp.so"),
+)
+
+
+def has_alsa_cdsp() -> bool:
+    """Return True if the alsa_cdsp ALSA PCM plugin is installed and enabled."""
+    if os.environ.get("HYDRA_DISABLE_ALSA_CDSP") == "1":
+        return False
+    return any(p.is_file() for p in ALSA_CDSP_PLUGIN_PATHS)
+
 RESAMPLER_PROFILES = {
     "SincVeryHigh": {"type": "AsyncSinc", "profile": "Accurate"},
     "SincHigh": {"type": "AsyncSinc", "profile": "Balanced"},
@@ -78,6 +90,7 @@ def build_camilladsp_config(
     volume_cfg: VolumeConfig,
     capture_device: str = "hw:Loopback,1,0",
     capture_rate: int = 44100,
+    use_alsa_cdsp: bool = False,
 ) -> dict:
     """Build a 64-bit float internal precision CamillaDSP YAML dictionary."""
     target_format = (
@@ -97,35 +110,74 @@ def build_camilladsp_config(
         if len(card_dev) == 2:
             playback_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
 
-    chunksize = 1024 if target_rate <= 48000 else (2048 if target_rate <= 96000 else 4096)
-
-    devices: dict = {
-        "samplerate": target_rate,
-        "chunksize": chunksize,
-        "enable_rate_adjust": True,
-        "capture": {
-            "type": "Alsa",
-            "channels": 2,
-            "device": capture_device,
-            "format": "S32_LE",
-        },
-        "playback": {
-            "type": "Alsa",
-            "channels": 2,
-            "device": playback_device,
-            "format": target_format,
-        },
-    }
-
-    if audio_cfg.resample_enabled and capture_rate != target_rate:
-        profile = RESAMPLER_PROFILES.get(
-            audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
+    if use_alsa_cdsp:
+        samplerate_val: int | str = (
+            audio_cfg.resample_rate if audio_cfg.resample_enabled else "$samplerate$"
         )
-        devices["resampler"] = {
-            "type": "AsyncSinc",
-            "profile": profile["profile"],
+        chunksize = (
+            1024
+            if (audio_cfg.resample_enabled and audio_cfg.resample_rate <= 48000)
+            else (
+                4096
+                if (audio_cfg.resample_enabled and audio_cfg.resample_rate > 96000)
+                else 2048
+            )
+        )
+        devices: dict = {
+            "samplerate": samplerate_val,
+            "chunksize": chunksize,
+            "enable_rate_adjust": True,
+            "capture": {
+                "type": "Stdin",
+                "channels": "$channels$",
+                "format": "$format$",
+            },
+            "playback": {
+                "type": "Alsa",
+                "channels": 2,
+                "device": playback_device,
+                "format": target_format,
+            },
         }
-        devices["capture_samplerate"] = capture_rate
+        if audio_cfg.resample_enabled:
+            profile = RESAMPLER_PROFILES.get(
+                audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
+            )
+            devices["resampler"] = {
+                "type": "AsyncSinc",
+                "profile": profile["profile"],
+            }
+            devices["capture_samplerate"] = "$samplerate$"
+    else:
+        chunksize = (
+            1024 if target_rate <= 48000 else (2048 if target_rate <= 96000 else 4096)
+        )
+        devices = {
+            "samplerate": target_rate,
+            "chunksize": chunksize,
+            "enable_rate_adjust": True,
+            "capture": {
+                "type": "Alsa",
+                "channels": 2,
+                "device": capture_device,
+                "format": "S32_LE",
+            },
+            "playback": {
+                "type": "Alsa",
+                "channels": 2,
+                "device": playback_device,
+                "format": target_format,
+            },
+        }
+        if audio_cfg.resample_enabled and capture_rate != target_rate:
+            profile = RESAMPLER_PROFILES.get(
+                audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
+            )
+            devices["resampler"] = {
+                "type": "AsyncSinc",
+                "profile": profile["profile"],
+            }
+            devices["capture_samplerate"] = capture_rate
 
     filters = {}
     pipeline = []
@@ -190,8 +242,72 @@ class CamillaDSPManager:
 
     def __init__(self, config_path: Optional[Path] = None) -> None:
         self.config_path = config_path or _default_camilla_config_path()
+        self.template_path = self.config_path.parent / "camilladsp_in.yml"
+        self.statefile_path = self.config_path.parent / "camilladsp_state.yml"
         self._proc: Optional[subprocess.Popen] = None
         self.running = False
+        self._cdsp_mode = False
+
+    def write_statefile(self, db: float, muted: bool) -> None:
+        """Persist Aux1 volume & mute into CamillaDSP statefile for alsa_cdsp spawns."""
+        self.statefile_path.parent.mkdir(parents=True, exist_ok=True)
+        state_data = {
+            "config_path": str(self.config_path),
+            "mute": [False, bool(muted), False, False, False],
+            "volume": [0.0, round(float(db), 2), 0.0, 0.0, 0.0],
+        }
+        self.statefile_path.write_text(
+            yaml.safe_dump(state_data, sort_keys=False), encoding="utf-8"
+        )
+
+    def render_cdsp_template(
+        self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig
+    ) -> str:
+        """Render CamillaDSP YAML template with unquoted alsa_cdsp substitution tokens."""
+        data = build_camilladsp_config(audio_cfg, volume_cfg, use_alsa_cdsp=True)
+        dumped = yaml.safe_dump(data, sort_keys=False)
+        for tok in ("$samplerate$", "$channels$", "$format$"):
+            dumped = dumped.replace(f"'{tok}'", tok).replace(f'"{tok}"', tok)
+        return dumped
+
+    def configure_alsa_cdsp(
+        self,
+        audio_cfg: AudioOutputConfig,
+        volume_cfg: VolumeConfig,
+        asound_conf_path: Path = Path("/etc/asound.conf"),
+    ) -> None:
+        """Configure alsa_cdsp template and /etc/asound.conf for native-rate DSP."""
+        self.stop()
+        self._cdsp_mode = True
+        self.template_path.parent.mkdir(parents=True, exist_ok=True)
+        self.template_path.write_text(
+            self.render_cdsp_template(audio_cfg, volume_cfg), encoding="utf-8"
+        )
+        if not self.statefile_path.exists():
+            self.write_statefile(-80.0, True)
+
+        asound_body = (
+            'defaults.pcm.rate_converter "speexrate_best"\n\n'
+            "pcm.camilladsp {\n"
+            "    type cdsp\n"
+            '    cpath "/usr/local/bin/camilladsp"\n'
+            f'    config_in "{self.template_path}"\n'
+            f'    config_out "{self.config_path}"\n'
+            f'    cargs [ -p "{CAMILLA_WS_PORT}" -a "127.0.0.1" '
+            f'-s "{self.statefile_path}" -o "/var/log/hydrasound-camilladsp.log" ]\n'
+            "}\n"
+        )
+        try:
+            if asound_conf_path.parent.exists() and os.access(
+                asound_conf_path.parent, os.W_OK
+            ):
+                if (
+                    not asound_conf_path.exists()
+                    or asound_conf_path.read_text(encoding="utf-8") != asound_body
+                ):
+                    asound_conf_path.write_text(asound_body, encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Failed to update %s for alsa_cdsp: %s", asound_conf_path, exc)
 
     def write_config(
         self,
@@ -210,6 +326,7 @@ class CamillaDSPManager:
         volume_cfg: VolumeConfig,
         capture_rate: int = 44100,
     ) -> None:
+        self._cdsp_mode = False
         new_yaml = yaml.safe_dump(
             build_camilladsp_config(audio_cfg, volume_cfg, capture_rate=capture_rate),
             sort_keys=False,
@@ -262,7 +379,21 @@ class CamillaDSPManager:
         self.running = False
 
     async def set_volume_db(self, db: float, muted: bool = False) -> None:
-        """Send live volume/mute update to CamillaDSP via WebSocket (retrying startup)."""
+        """Send live volume/mute update to CamillaDSP via WebSocket and statefile."""
+        if self._cdsp_mode:
+            self.write_statefile(db, muted)
+            uri = f"ws://127.0.0.1:{CAMILLA_WS_PORT}"
+            try:
+                async with websockets.connect(uri, open_timeout=0.5) as ws:
+                    await ws.send(json.dumps({"SetFaderVolume": [1, db]}))
+                    await ws.recv()
+                    await ws.send(json.dumps({"SetFaderMute": [1, muted]}))
+                    await ws.recv()
+            except Exception:
+                # Idle between streams (alsa_cdsp spawns camilladsp on demand)
+                pass
+            return
+
         if not self.running:
             return
         if self._proc and self._proc.poll() is not None:

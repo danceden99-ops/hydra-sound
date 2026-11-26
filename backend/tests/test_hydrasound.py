@@ -361,5 +361,48 @@ def test_stream0_playback_parsing_and_hdmi_format(monkeypatch) -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_alsa_cdsp_template_and_statefile_volume_limits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import yaml
+
+    from app.audio import camilladsp as cdsp_mod
+    from app.audio import pipeline as pipe_mod
+
+    monkeypatch.setenv("HYDRA_HARD_MAX_VOLUME", "65")
+    camilla = CamillaDSPManager(config_path=tmp_path / "camilladsp.yml")
+    audio = AudioOutputConfig(
+        device_id="hw:4,0",
+        resample_enabled=True,
+        resample_rate=96000,
+        resample_bit_depth=24,
+    )
+    vol = VolumeConfig(mode="software", max_volume=80, power_on_volume=90, current_volume=90)
+
+    asound_conf = tmp_path / "asound.conf"
+    camilla.configure_alsa_cdsp(audio, vol, asound_conf_path=asound_conf)
+    assert "type cdsp" in asound_conf.read_text(encoding="utf-8")
+
+    tmpl_text = camilla.template_path.read_text(encoding="utf-8")
+    assert "channels: $channels$" in tmpl_text
+    assert "capture_samplerate: $samplerate$" in tmpl_text
+    assert "type: Stdin" in tmpl_text
+
+    # Test statefile volume & max-limit enforcement
+    ctrl = VolumeController(camilla)
+    await ctrl.apply_power_on(audio, vol)
+    assert vol.current_volume == 65  # Clamped to HYDRA_HARD_MAX_VOLUME
+    state_data = yaml.safe_load(camilla.statefile_path.read_text(encoding="utf-8"))
+    assert state_data["mute"][1] is False
+    assert state_data["volume"][1] == round(percent_to_db(65, "logarithmic"), 2)
+
+    monkeypatch.setattr(pipe_mod, "has_alsa_cdsp", lambda: True)
+    monkeypatch.setattr(cdsp_mod, "has_alsa_cdsp", lambda: True)
+    pipeline = AudioPipelineManager(camilla)
+    assert pipeline.get_renderer_alsa_device(audio, vol) == "camilladsp"
+
+
+
 
 

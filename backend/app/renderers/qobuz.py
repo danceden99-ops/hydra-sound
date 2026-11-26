@@ -27,11 +27,14 @@ class QobuzRenderer(RendererAdapter):
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         qc = cfg.renderers.qobuz
-        is_loopback = "loopback" in alsa_device.lower()
-        is_hdmi = "hdmi" in cfg.audio.device_name.lower()
-        target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
-
-        alsa_plugin = "plughw" if is_loopback else "hw"
+        if alsa_device == "camilladsp":
+            alsa_plugin = "hw"
+            target_device = "camilladsp"
+        else:
+            is_loopback = "loopback" in alsa_device.lower()
+            is_hdmi = "hdmi" in cfg.audio.device_name.lower()
+            target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
+            alsa_plugin = "plughw" if is_loopback else "hw"
 
         # Apply device name & ALSA settings via pibuz settings CLI before running daemon
         for key, value in (
