@@ -52,8 +52,8 @@ class RendererAdapter(ABC):
         try:
             self._proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
             )
             self.connection_status = "advertising"
@@ -76,10 +76,11 @@ class RendererAdapter(ABC):
             return False
 
     def _drain_stderr(self, proc: subprocess.Popen) -> None:
-        if not proc.stderr:
+        stream = proc.stdout or proc.stderr
+        if not stream:
             return
         try:
-            for line in proc.stderr:
+            for line in stream:
                 clean = line.strip()
                 if clean:
                     self._update_connection_state(clean)
