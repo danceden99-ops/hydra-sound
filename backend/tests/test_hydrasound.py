@@ -466,6 +466,19 @@ def test_qobuz_volume_sync_and_debounce() -> None:
     assert renderer._should_log_line("2026-11-26 21:03:06.105 INFO  pibuz::qconnect::sink [QConnect] Renderer updated: playing_state=Some(3) volume=Some(33)") is True
 
 
+def test_hardware_mode_falls_back_to_software_on_missing_mixer(monkeypatch) -> None:
+    from app.volume import controller as vol_mod
+
+    monkeypatch.setattr(vol_mod, "list_mixers", lambda card: [])
+    with TestClient(app) as client:
+        res = client.post("/api/volume/config", json={"mode": "hardware"})
+        assert res.status_code == 200
+        body = res.json()
+        assert body["volume"]["mode"] == "software"
+        assert body["fallback_to_software"] is True
+        assert body["hardware_error"] is not None
+
+
 
 
 

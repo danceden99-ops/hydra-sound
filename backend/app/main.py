@@ -76,6 +76,12 @@ async def lifespan(app: FastAPI):
 
     if cfg.volume.mode == "hardware":
         await volume_controller.apply_power_on(cfg.audio, cfg.volume)
+        if volume_controller.hardware_error:
+            logger.warning(
+                "Hardware mixer unavailable (%s); falling back to Software (CamillaDSP) volume control.",
+                volume_controller.hardware_error,
+            )
+            cfg.volume.mode = "software"
     orchestrator.start_enabled_renderers(cfg)
     await volume_controller.apply_power_on(cfg.audio, cfg.volume)
     config_store.save(cfg)

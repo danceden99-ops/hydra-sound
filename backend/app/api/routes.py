@@ -232,8 +232,18 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         )
         state.config_store.save(cfg)
 
+    fallback_error: Optional[str] = None
     if cfg.volume.mode == "hardware":
         await state.volume_controller.apply(cfg.audio, cfg.volume)
+        if state.volume_controller.hardware_error:
+            fallback_error = state.volume_controller.hardware_error
+            logging.getLogger(__name__).warning(
+                "Hardware mixer unavailable (%s); falling back to Software (CamillaDSP) volume control.",
+                fallback_error,
+            )
+            cfg.volume.mode = "software"
+            state.config_store.save(cfg)
+            mode_changed = True
     if mode_changed or state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume):
         state.orchestrator.start_enabled_renderers(cfg)
     elif cfg.volume.mode == "software" and (max_changed or curve_changed):
@@ -248,6 +258,8 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         "ok": True,
         "volume": cfg.volume.model_dump(),
         "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
+        "fallback_to_software": fallback_error is not None,
+        "hardware_error": fallback_error,
     }
 
 
