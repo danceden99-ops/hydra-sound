@@ -354,13 +354,34 @@ async def get_system_version(request: Request) -> dict:
     )
 
 
+def _read_camilladsp_log_lines(limit: int = 100) -> list[str]:
+    from pathlib import Path
+
+    cam_log = Path("/var/log/hydrasound-camilladsp.log")
+    if not cam_log.is_file():
+        return []
+    try:
+        raw_lines = [
+            ln for ln in cam_log.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()
+        ]
+        return [f"[camilladsp] {ln}" for ln in raw_lines[-limit:]]
+    except Exception:
+        return []
+
+
 @router.get("/system/logs")
 async def get_system_logs(request: Request) -> dict:
     cfg: HydraConfig = request.app.state.config_store.get()
     handler = getattr(request.app.state, "log_handler", None)
+    cam_lines = _read_camilladsp_log_lines()
     if not handler:
-        return {"lines": [], "count": 0, "path": "", "enabled": cfg.system.logging_enabled}
-    lines = handler.get_lines()
+        return {
+            "lines": cam_lines,
+            "count": len(cam_lines),
+            "path": "",
+            "enabled": cfg.system.logging_enabled,
+        }
+    lines = handler.get_lines() + cam_lines
     return {
         "lines": lines,
         "count": len(lines),
@@ -371,16 +392,24 @@ async def get_system_logs(request: Request) -> dict:
 
 @router.post("/system/logs/clear")
 async def clear_system_logs(request: Request) -> dict:
+    from pathlib import Path
+
     handler = getattr(request.app.state, "log_handler", None)
     if handler:
         handler.clear()
+    cam_log = Path("/var/log/hydrasound-camilladsp.log")
+    if cam_log.is_file():
+        try:
+            cam_log.write_text("", encoding="utf-8")
+        except Exception:
+            pass
     return {"ok": True}
 
 
 @router.get("/system/logs/download")
 async def download_system_logs(request: Request) -> PlainTextResponse:
     handler = getattr(request.app.state, "log_handler", None)
-    lines = handler.get_lines() if handler else []
+    lines = (handler.get_lines() if handler else []) + _read_camilladsp_log_lines(limit=250)
     content = "\n".join(lines) + ("\n" if lines else "")
     return PlainTextResponse(
         content=content,
