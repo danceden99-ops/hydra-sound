@@ -2,11 +2,14 @@
 set -euo pipefail
 # Modular installer/updater for Qobuz Connect (pibuz)
 ASSET_URL="https://github.com/danceden99-ops/hydra-sound/releases/latest/download/hydra-sound-arm64-binaries.tar.gz"
+SHA_URL="${ASSET_URL}.sha256"
 
 if [[ "${PREFER_SOURCE:-0}" != "1" ]] && [[ "$(uname -m)" == "aarch64" ]]; then
   TMP_DIR=$(mktemp -d)
-  if curl -fsSL "$ASSET_URL" -o "$TMP_DIR/bins.tar.gz"; then
-    tar -xzf "$TMP_DIR/bins.tar.gz" -C /usr/local/bin pibuz
+  if curl -fsSL "$ASSET_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz" \
+    && curl -fsSL "$SHA_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz.sha256" \
+    && (cd "$TMP_DIR" && sha256sum -c hydra-sound-arm64-binaries.tar.gz.sha256); then
+    tar -xzf "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz" -C /usr/local/bin pibuz
     chmod +x /usr/local/bin/pibuz
     rm -rf "$TMP_DIR"
     echo "Installed prebuilt pibuz binary."

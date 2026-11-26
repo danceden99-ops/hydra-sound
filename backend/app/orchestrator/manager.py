@@ -57,6 +57,7 @@ class StreamOrchestrator:
         self.stream = StreamInfo()
         self._pause_task: Optional[asyncio.Task] = None
         self._current_alsa_device: str = "hw:0,0"
+        self._active_capture_rate: int = 44100
 
     def start_enabled_renderers(self, cfg: HydraConfig) -> None:
         self._current_alsa_device = self.pipeline.apply(cfg.audio, cfg.volume)
@@ -148,6 +149,15 @@ class StreamOrchestrator:
                 self.stream.incoming_format = incoming_format
             if incoming_rate:
                 self.stream.incoming_rate = incoming_rate
+                if (
+                    8000 <= incoming_rate <= 768000
+                    and incoming_rate != self._active_capture_rate
+                    and self.pipeline.requires_dsp(cfg.audio, cfg.volume)
+                ):
+                    self._active_capture_rate = incoming_rate
+                    self.pipeline.apply(
+                        cfg.audio, cfg.volume, capture_rate=incoming_rate
+                    )
             if incoming_bit_depth:
                 self.stream.incoming_bit_depth = incoming_bit_depth
             self.refresh_outgoing_format(cfg)

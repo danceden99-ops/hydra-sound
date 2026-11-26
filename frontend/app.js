@@ -71,6 +71,15 @@ function updateLiveUI(data) {
   $("vol-mode-badge").textContent = data.usb_safety_muted ? "MUTED (USB SAFETY)" : volume.mode.toUpperCase();
   const usbBanner = $("usb-safety-banner");
   if (usbBanner) usbBanner.hidden = !data.usb_safety_muted;
+  const hwBanner = $("hw-volume-error-banner");
+  if (hwBanner) {
+    if (data.hardware_volume_error) {
+      hwBanner.textContent = data.hardware_volume_error;
+      hwBanner.hidden = false;
+    } else {
+      hwBanner.hidden = true;
+    }
+  }
   const disabled = volume.mode === "disabled";
   $("vol-slider").disabled = disabled;
   $("btn-mute").disabled = disabled;

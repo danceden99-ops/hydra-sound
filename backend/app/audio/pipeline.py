@@ -50,17 +50,23 @@ class AudioPipelineManager:
             return LOOPBACK_PLAYBACK_DEVICE
         return audio_cfg.device_id
 
-    def apply(self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig) -> str:
+    def apply(
+        self,
+        audio_cfg: AudioOutputConfig,
+        volume_cfg: VolumeConfig,
+        capture_rate: int = 44100,
+    ) -> str:
         """Apply current audio & volume config; return ALSA device for renderers."""
         if self.requires_dsp(audio_cfg, volume_cfg):
             logger.info(
-                "DSP mode active (software_vol=%s, resample=%s -> %sHz/%sbit)",
+                "DSP mode active (software_vol=%s, resample=%s -> %sHz/%sbit, capture=%sHz)",
                 volume_cfg.mode == "software",
                 audio_cfg.resample_enabled,
                 audio_cfg.resample_rate,
                 audio_cfg.resample_bit_depth,
+                capture_rate,
             )
-            self.camilla.start(audio_cfg, volume_cfg)
+            self.camilla.start(audio_cfg, volume_cfg, capture_rate=capture_rate)
             return LOOPBACK_PLAYBACK_DEVICE
 
         logger.info("Bit-perfect bypass active -> %s", audio_cfg.device_id)

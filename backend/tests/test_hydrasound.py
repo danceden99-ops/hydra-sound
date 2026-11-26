@@ -300,4 +300,29 @@ def test_percent_to_db_monotonic_and_camilladsp_limit() -> None:
         percent_to_db(60, "logarithmic"), 2
     )
 
+    # Resampling adds Limiter + Dither (for 16/24-bit) and preserves capture_rate
+    audio_res = AudioOutputConfig(
+        device_id="hw:1,0",
+        resample_enabled=True,
+        resample_rate=192000,
+        resample_bit_depth=24,
+    )
+    cfg_res = build_camilladsp_config(audio_res, vol, capture_rate=96000)
+    assert cfg_res["devices"]["capture_samplerate"] == 96000
+    assert "dsp_limiter" in cfg_res["filters"]
+    assert "dsp_dither" in cfg_res["filters"]
+
+
+@pytest.mark.asyncio
+async def test_hardware_mode_missing_mixer_sets_error(monkeypatch) -> None:
+    from app.volume import controller as vol_mod
+
+    monkeypatch.setattr(vol_mod, "list_mixers", lambda card: [])
+    ctrl = VolumeController(CamillaDSPManager())
+    audio = AudioOutputConfig(device_id="hw:1,0", device_name="HDMI")
+    vol = VolumeConfig(mode="hardware", max_volume=60, power_on_volume=40)
+    await ctrl.apply(audio, vol)
+    assert ctrl.hardware_error is not None
+
+
 

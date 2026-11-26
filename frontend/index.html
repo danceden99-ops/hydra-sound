@@ -68,6 +68,7 @@
           <button id="btn-confirm-usb-disabled" class="btn btn-sm btn-danger">I Confirm — Unmute 0 dB Pass-Through</button>
         </div>
       </div>
+      <div id="hw-volume-error-banner" class="hint" hidden style="margin-top: 10px; padding: 10px; border-radius: 6px; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.12); color: #fde68a;"></div>
     </section>
 
     <!-- Tabs -->
@@ -90,7 +91,7 @@
         </label>
         <label class="checkbox-row">
           <input type="checkbox" id="resample-enabled" />
-          <span>Enable Resampling (Disables Bit-Perfect Bypass)</span>
+          <span>Enable Resampling (Overrides Auto Bypass — Bit-Perfect Default)</span>
         </label>
         <label>
           Target Sample Rate (Hz)

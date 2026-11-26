@@ -13,6 +13,7 @@ from typing import Optional
 import websockets
 import yaml
 
+from app.audio.alsa import select_best_pcm_format
 from app.config import AudioOutputConfig, VolumeConfig
 
 logger = logging.getLogger(__name__)
@@ -65,14 +66,15 @@ def build_camilladsp_config(
     audio_cfg: AudioOutputConfig,
     volume_cfg: VolumeConfig,
     capture_device: str = "hw:Loopback,1,0",
+    capture_rate: int = 44100,
 ) -> dict:
     """Build a 64-bit float internal precision CamillaDSP YAML dictionary."""
     target_format = (
         bit_depth_to_alsa_format(audio_cfg.resample_bit_depth)
         if audio_cfg.resample_enabled
-        else "S32_LE"
+        else select_best_pcm_format(audio_cfg.device_id)
     )
-    target_rate = audio_cfg.resample_rate if audio_cfg.resample_enabled else 44100
+    target_rate = audio_cfg.resample_rate if audio_cfg.resample_enabled else capture_rate
 
     playback_device = audio_cfg.device_id
     if (
@@ -112,7 +114,7 @@ def build_camilladsp_config(
             "type": "AsyncSinc",
             "profile": profile["profile"],
         }
-        devices["capture_samplerate"] = 44100
+        devices["capture_samplerate"] = capture_rate
 
     filters = {}
     pipeline = []
@@ -138,6 +140,26 @@ def build_camilladsp_config(
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["master_volume"]})
 
+    if audio_cfg.resample_enabled:
+        filters["dsp_limiter"] = {
+            "type": "Limiter",
+            "parameters": {
+                "clip_limit": -0.1,
+                "soft_clip": False,
+            },
+        }
+        pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["dsp_limiter"]})
+        if audio_cfg.resample_bit_depth in (16, 24):
+            filters["dsp_dither"] = {
+                "type": "Dither",
+                "parameters": {
+                    "type": "Flat",
+                    "bits": audio_cfg.resample_bit_depth,
+                    "amplitude": 2.0,
+                },
+            }
+            pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["dsp_dither"]})
+
     return {
         "devices": devices,
         "filters": filters,
@@ -153,15 +175,26 @@ class CamillaDSPManager:
         self._proc: Optional[subprocess.Popen] = None
         self.running = False
 
-    def write_config(self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig) -> Path:
+    def write_config(
+        self,
+        audio_cfg: AudioOutputConfig,
+        volume_cfg: VolumeConfig,
+        capture_rate: int = 44100,
+    ) -> Path:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        data = build_camilladsp_config(audio_cfg, volume_cfg)
+        data = build_camilladsp_config(audio_cfg, volume_cfg, capture_rate=capture_rate)
         self.config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
         return self.config_path
 
-    def start(self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig) -> None:
+    def start(
+        self,
+        audio_cfg: AudioOutputConfig,
+        volume_cfg: VolumeConfig,
+        capture_rate: int = 44100,
+    ) -> None:
         new_yaml = yaml.safe_dump(
-            build_camilladsp_config(audio_cfg, volume_cfg), sort_keys=False
+            build_camilladsp_config(audio_cfg, volume_cfg, capture_rate=capture_rate),
+            sort_keys=False,
         )
         if (
             self.running

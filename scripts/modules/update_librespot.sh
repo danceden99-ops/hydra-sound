@@ -8,10 +8,9 @@ if [[ "${PREFER_SOURCE:-0}" != "1" ]] && [[ "$(uname -m)" == "aarch64" ]]; then
   apt-get update && apt-get install -y libogg0 libvorbis0a libvorbisfile3 libmpg123-0 >/dev/null 2>&1 || true
   apt-get install -y libflac12 >/dev/null 2>&1 || apt-get install -y libflac14 >/dev/null 2>&1 || true
   TMP_DIR=$(mktemp -d)
-  if curl -fsSL "$ASSET_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz"; then
-    if curl -fsSL "$SHA_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz.sha256" 2>/dev/null; then
-      (cd "$TMP_DIR" && sha256sum -c hydra-sound-arm64-binaries.tar.gz.sha256)
-    fi
+  if curl -fsSL "$ASSET_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz" \
+    && curl -fsSL "$SHA_URL" -o "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz.sha256" \
+    && (cd "$TMP_DIR" && sha256sum -c hydra-sound-arm64-binaries.tar.gz.sha256); then
     tar -xzf "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz" -C /usr/local/bin
     chmod +x /usr/local/bin/librespot /usr/local/bin/go-librespot 2>/dev/null || true
     if [[ ! -s /usr/local/bin/go-librespot.version ]]; then

@@ -15,9 +15,14 @@ mkdir -p "$APP_DIR" /etc/hydrasound
 apt-get update
 apt-get install -y \
   python3 python3-venv python3-pip \
-  alsa-utils libasound2-dev avahi-daemon libnss-mdns network-manager \
+  alsa-utils libasound2-dev libasound2-plugins avahi-daemon libnss-mdns network-manager \
   shairport-sync gmediarender gstreamer1.0-alsa gstreamer1.0-plugins-good \
   curl git build-essential pkg-config
+
+# Use high-quality ALSA rate converter when ALSA plug is engaged (e.g. Loopback)
+if [[ ! -f /etc/asound.conf ]] || ! grep -q "rate_converter" /etc/asound.conf; then
+  echo 'defaults.pcm.rate_converter "speexrate_best"' >> /etc/asound.conf
+fi
 
 # Let Hydra Sound orchestrator manage shairport-sync & gmediarender
 systemctl disable --now shairport-sync gmediarender || true

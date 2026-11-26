@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.audio.alsa import format_named_alsa_device
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
@@ -21,6 +22,8 @@ class DLNARenderer(RendererAdapter):
 
     def build_command(self, cfg: HydraConfig, alsa_device: str) -> list[str]:
         dc = cfg.renderers.dlna
+        is_hdmi = "hdmi" in cfg.audio.device_name.lower()
+        target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
         return [
             "gmediarender",
             "--friendly-name",
@@ -28,7 +31,7 @@ class DLNARenderer(RendererAdapter):
             "--gstout-audiosink",
             "alsasink",
             "--gstout-audiodevice",
-            alsa_device,
+            target_device,
             "--gstout-initial-volume-db",
             "0",
         ]

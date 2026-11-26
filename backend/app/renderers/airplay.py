@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from app.audio.alsa import format_named_alsa_device
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
@@ -54,6 +55,8 @@ class AirPlayRenderer(RendererAdapter):
         conf_path = _get_shairport_conf_path()
         conf_path.parent.mkdir(parents=True, exist_ok=True)
         ap = cfg.renderers.airplay
+        is_hdmi = "hdmi" in cfg.audio.device_name.lower()
+        target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
         conf = f"""general = {{
   name = "{ap.device_name}";
   interpolation = "soxr";
@@ -62,8 +65,8 @@ class AirPlayRenderer(RendererAdapter):
 }};
 
 alsa = {{
-  output_device = "{alsa_device}";
-  output_rate = 44100;
+  output_device = "{target_device}";
+  output_rate = "auto";
   output_format = "auto";
 }};
 

@@ -308,3 +308,35 @@ def get_device_capabilities(device_id: str) -> dict:
         "hw_params": hw_dump or "No hardware parameters reported (device may be busy or unavailable).",
         "usb_stream": usb_stream,
     }
+
+
+_FORMAT_CACHE: Dict[str, Tuple[float, str]] = {}
+
+
+def select_best_pcm_format(device_id: str) -> str:
+    """Return the highest supported ALSA PCM format (S32_LE > S24_3_LE > S24_LE > S16_LE)."""
+    now = time.monotonic()
+    cached = _FORMAT_CACHE.get(device_id)
+    if cached and now - cached[0] < 60.0:
+        return cached[1]
+
+    best = "S32_LE"
+    m = re.match(r"^(?:hw|plughw):(\d+),(\d+)$", device_id.strip())
+    if m:
+        card = m.group(1)
+        text = ""
+        stream0 = Path(f"/proc/asound/card{card}/stream0")
+        if stream0.exists():
+            try:
+                text = stream0.read_text(encoding="utf-8")
+            except Exception:
+                text = ""
+        if not text:
+            caps = get_device_capabilities(device_id)
+            text = (caps.get("hw_params") or "") + "\n" + (caps.get("usb_stream") or "")
+        for fmt in ("S32_LE", "S24_3_LE", "S24_LE", "S16_LE"):
+            if fmt in text:
+                best = fmt
+                break
+    _FORMAT_CACHE[device_id] = (now, best)
+    return best

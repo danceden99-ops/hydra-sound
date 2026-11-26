@@ -85,6 +85,7 @@ async def get_status(request: Request) -> dict:
         "network": state.network_manager.get_status(cfg.network),
         "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume),
         "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
+        "hardware_volume_error": state.volume_controller.hardware_error,
         "renderers": state.orchestrator.get_renderers_status(cfg),
     }
 

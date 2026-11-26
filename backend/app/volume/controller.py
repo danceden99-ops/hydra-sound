@@ -42,6 +42,7 @@ class VolumeController:
         self.camilla = camilla
         self.on_volume_changed = on_volume_changed
         self._lock = asyncio.Lock()
+        self.hardware_error: Optional[str] = None
 
     def clamp_volume(self, value: int, cfg: VolumeConfig) -> int:
         max_allowed = max(0, min(100, int(cfg.max_volume)))
@@ -119,6 +120,7 @@ class VolumeController:
         notify_client: bool = True,
     ) -> None:
         if vol_cfg.mode == "disabled":
+            self.hardware_error = None
             if not vol_cfg.usb_disabled_confirmed and is_usb_audio_device(
                 audio_cfg.device_id, audio_cfg.device_name
             ):
@@ -133,6 +135,7 @@ class VolumeController:
         if vol_cfg.mode == "hardware":
             self._apply_hardware_alsa(audio_cfg.device_id, vol_cfg)
         elif vol_cfg.mode == "software":
+            self.hardware_error = None
             max_db = percent_to_db(vol_cfg.max_volume, vol_cfg.curve)
             db = min(percent_to_db(vol_cfg.current_volume, vol_cfg.curve), max_db)
             await self.camilla.set_volume_db(db, muted=vol_cfg.muted)
@@ -147,10 +150,28 @@ class VolumeController:
         mixer = vol_cfg.hardware_mixer_name or "PCM"
         try:
             available = list_mixers(int(card))
+            non_vol_keywords = (
+                "mic",
+                "capture",
+                "adc",
+                "input",
+                "boost",
+                "clock",
+                "source",
+                "sync",
+                "internal",
+                "valid",
+            )
             playback_mixers = [
                 m for m in available
-                if not any(k in m.lower() for k in ("mic", "capture", "adc", "input", "boost"))
-            ] or available
+                if not any(k in m.lower() for k in non_vol_keywords)
+            ]
+            if not available or (mixer not in available and not playback_mixers):
+                self.hardware_error = (
+                    f"No usable hardware mixer on {device_id}; hardware volume limit is NOT active."
+                )
+                logger.warning(self.hardware_error)
+                return
             if playback_mixers and mixer not in available:
                 logger.info(
                     "ALSA mixer '%s' not found on card %s; using '%s'.",
@@ -159,8 +180,10 @@ class VolumeController:
                     playback_mixers[0],
                 )
                 mixer = playback_mixers[0]
-        except Exception:
-            pass
+        except Exception as exc:
+            self.hardware_error = f"Unable to query ALSA mixers on {device_id}: {exc}"
+            logger.warning(self.hardware_error)
+            return
         safe_level = self.clamp_volume(vol_cfg.current_volume, vol_cfg)
         target = "0%" if vol_cfg.muted else f"{safe_level}%"
         try:
@@ -171,11 +194,13 @@ class VolumeController:
                 timeout=2,
             )
             if res.returncode != 0:
-                logger.warning(
-                    "ALSA hardware mixer '%s' on card %s failed: %s",
-                    mixer,
-                    card,
-                    (res.stderr or res.stdout).strip(),
+                err = (res.stderr or res.stdout).strip()
+                self.hardware_error = (
+                    f"ALSA hardware mixer '{mixer}' failed on card {card}: {err}"
                 )
+                logger.warning(self.hardware_error)
+            else:
+                self.hardware_error = None
         except Exception as exc:
-            logger.warning("ALSA hardware mixer update failed: %s", exc)
+            self.hardware_error = f"ALSA hardware mixer update failed: {exc}"
+            logger.warning(self.hardware_error)

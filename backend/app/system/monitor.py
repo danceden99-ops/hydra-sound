@@ -350,8 +350,8 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
                     "bash",
                     "-c",
                     f'TMP=$(mktemp -d) && curl -fsSL "{asset_url}" -o "$TMP/hydra-sound-arm64-binaries.tar.gz" '
-                    f'&& (curl -fsSL "{sha_url}" -o "$TMP/hydra-sound-arm64-binaries.tar.gz.sha256" 2>/dev/null '
-                    '&& (cd "$TMP" && sha256sum -c hydra-sound-arm64-binaries.tar.gz.sha256) || true) '
+                    f'&& curl -fsSL "{sha_url}" -o "$TMP/hydra-sound-arm64-binaries.tar.gz.sha256" '
+                    '&& (cd "$TMP" && sha256sum -c hydra-sound-arm64-binaries.tar.gz.sha256) '
                     '&& tar -xzf "$TMP/hydra-sound-arm64-binaries.tar.gz" -C /usr/local/bin '
                     '&& chmod +x /usr/local/bin/librespot /usr/local/bin/pibuz /usr/local/bin/go-librespot 2>/dev/null || true '
                     '&& ([ -s /usr/local/bin/go-librespot.version ] || '
