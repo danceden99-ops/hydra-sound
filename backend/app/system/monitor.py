@@ -96,10 +96,19 @@ _APT_MANAGED_PACKAGES = {
 }
 
 
+def _get_binary_version(cmd: list[str]) -> Optional[str]:
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+        out = (res.stdout or res.stderr).strip()
+        return out.splitlines()[0] if out else None
+    except Exception:
+        return None
+
+
 async def check_all_module_updates(
     renderers: Dict[str, RendererAdapter],
 ) -> List[Dict[str, object]]:
-    """Return installed vs latest upstream versions for all modular renderers."""
+    """Return installed vs latest upstream versions for all modular renderers + CamillaDSP."""
     results: List[Dict[str, object]] = []
     for rid, adapter in renderers.items():
         installed = adapter.get_installed_version()
@@ -128,12 +137,31 @@ async def check_all_module_updates(
                 "quality_note": adapter.meta.quality_note,
             }
         )
+
+    camilla_installed = _get_binary_version(["camilladsp", "--version"])
+    camilla_latest = await check_github_latest_release("HEnquist/camilladsp") or "Unknown"
+    camilla_update = bool(
+        camilla_latest != "Unknown"
+        and (not camilla_installed or camilla_latest.lstrip("v") not in camilla_installed)
+    )
+    results.append(
+        {
+            "id": "camilladsp",
+            "display_name": "CamillaDSP (64-bit DSP Engine)",
+            "github_repo": "HEnquist/camilladsp",
+            "installed_version": camilla_installed or "Not installed",
+            "latest_version": camilla_latest,
+            "update_available": camilla_update,
+            "update_script": "scripts/modules/update_camilladsp.sh",
+            "quality_note": "64-bit floating-point resampling & software volume engine.",
+        }
+    )
     return results
 
 
-def run_module_update(adapter: RendererAdapter) -> Dict[str, object]:
-    """Execute the module's isolated update script."""
-    script_path = Path(__file__).resolve().parents[3] / adapter.meta.update_script
+def run_script_update(script_rel_path: str) -> Dict[str, object]:
+    """Execute a module update script relative to repository root."""
+    script_path = Path(__file__).resolve().parents[3] / script_rel_path
     if not script_path.exists():
         return {"ok": False, "error": f"Update script not found: {script_path}"}
     try:
@@ -150,6 +178,11 @@ def run_module_update(adapter: RendererAdapter) -> Dict[str, object]:
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def run_module_update(adapter: RendererAdapter) -> Dict[str, object]:
+    """Execute the module's isolated update script."""
+    return run_script_update(adapter.meta.update_script)
 
 
 async def get_app_version_info(

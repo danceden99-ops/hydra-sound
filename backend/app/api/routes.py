@@ -27,6 +27,7 @@ from app.system.monitor import (
     install_github_release,
     list_github_releases,
     run_module_update,
+    run_script_update,
 )
 
 router = APIRouter(prefix="/api")
@@ -422,13 +423,22 @@ async def trigger_module_update(module_id: str, request: Request) -> dict:
     import asyncio
 
     state = request.app.state
+    cfg: HydraConfig = state.config_store.get()
+    if module_id == "camilladsp":
+        state.pipeline.camilla.stop()
+        res = await asyncio.to_thread(
+            run_script_update, "scripts/modules/update_camilladsp.sh"
+        )
+        state.orchestrator.start_enabled_renderers(cfg)
+        await state.volume_controller.apply(cfg.audio, cfg.volume)
+        return res
+
     renderers = state.orchestrator.renderers
     if module_id not in renderers:
         raise HTTPException(status_code=404, detail="Unknown module")
     adapter = renderers[module_id]
     adapter.stop()
     res = await asyncio.to_thread(run_module_update, adapter)
-    cfg: HydraConfig = state.config_store.get()
     if adapter.is_enabled(cfg):
         adapter.start(cfg, state.orchestrator._current_alsa_device)
     return res
