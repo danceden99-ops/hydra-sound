@@ -218,13 +218,15 @@ class CamillaDSPManager:
         if volume_cfg.mode == "software" or (
             volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed
         ):
-            cmd.extend(["--gain", "-80.0", "--mute"])
+            cmd.append("--gain=-80.0")
+            cmd.append("--mute")
         cmd.append(str(self.config_path))
         try:
             self._proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
             self.running = True
             logger.info("Started CamillaDSP on %s", audio_cfg.device_id)
@@ -249,14 +251,22 @@ class CamillaDSPManager:
         if self._proc and self._proc.poll() is not None:
             self.running = False
             tail = ""
-            log_path = Path("/var/log/hydrasound-camilladsp.log")
-            if log_path.is_file():
+            if self._proc.stdout:
                 try:
-                    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-                    err_lines = [ln for ln in lines[-10:] if "ERROR" in ln or "Playback" in ln]
-                    tail = " | ".join(err_lines or lines[-3:])
+                    out = self._proc.stdout.read().strip()
+                    if out:
+                        tail = " | ".join(out.splitlines()[-5:])
                 except Exception:
                     pass
+            if not tail:
+                log_path = Path("/var/log/hydrasound-camilladsp.log")
+                if log_path.is_file():
+                    try:
+                        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                        err_lines = [ln for ln in lines[-10:] if "ERROR" in ln or "Playback" in ln]
+                        tail = " | ".join(err_lines or lines[-3:])
+                    except Exception:
+                        pass
             logger.warning(
                 "CamillaDSP process exited; cannot apply volume %.2f dB%s",
                 db,
