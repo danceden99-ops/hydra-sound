@@ -256,6 +256,15 @@ class SpotifyRenderer(RendererAdapter):
 
     def get_installed_version(self) -> Optional[str]:
         if self._has_go_librespot():
-            return "go-librespot"
+            ver_file = Path("/usr/local/bin/go-librespot.version")
+            if ver_file.is_file():
+                ver = ver_file.read_text(encoding="utf-8").strip()
+                if ver:
+                    return f"go-librespot {ver}"
+            self.meta.binary_name = "go-librespot"
+            out = super().get_installed_version()
+            if out and "unknown flag" not in out.lower() and "usage" not in out.lower():
+                return f"go-librespot {out}"
+            return "go-librespot (installed)"
         self.meta.binary_name = "librespot"
         return super().get_installed_version()

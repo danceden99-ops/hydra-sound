@@ -14,6 +14,10 @@ if [[ "${PREFER_SOURCE:-0}" != "1" ]] && [[ "$(uname -m)" == "aarch64" ]]; then
     fi
     tar -xzf "$TMP_DIR/hydra-sound-arm64-binaries.tar.gz" -C /usr/local/bin
     chmod +x /usr/local/bin/librespot /usr/local/bin/go-librespot 2>/dev/null || true
+    if [[ ! -s /usr/local/bin/go-librespot.version ]]; then
+      curl -fsSL https://api.github.com/repos/devgianlu/go-librespot/releases/latest \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' > /usr/local/bin/go-librespot.version || true
+    fi
     rm -rf "$TMP_DIR"
     echo "Installed prebuilt Spotify Connect binaries."
     exit 0

@@ -353,7 +353,11 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
                     f'&& (curl -fsSL "{sha_url}" -o "$TMP/hydra-sound-arm64-binaries.tar.gz.sha256" 2>/dev/null '
                     '&& (cd "$TMP" && sha256sum -c hydra-sound-arm64-binaries.tar.gz.sha256) || true) '
                     '&& tar -xzf "$TMP/hydra-sound-arm64-binaries.tar.gz" -C /usr/local/bin '
-                    '&& chmod +x /usr/local/bin/librespot /usr/local/bin/pibuz /usr/local/bin/go-librespot 2>/dev/null || true; rm -rf "$TMP"',
+                    '&& chmod +x /usr/local/bin/librespot /usr/local/bin/pibuz /usr/local/bin/go-librespot 2>/dev/null || true '
+                    '&& ([ -s /usr/local/bin/go-librespot.version ] || '
+                    '(curl -fsSL https://api.github.com/repos/devgianlu/go-librespot/releases/latest '
+                    '| sed -n \'s/.*"tag_name": *"\\([^"]*\\)".*/\\1/p\' > /usr/local/bin/go-librespot.version || true)); '
+                    'rm -rf "$TMP"',
                 ],
                 capture_output=True,
                 text=True,
