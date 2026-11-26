@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import threading
 from abc import ABC, abstractmethod
@@ -49,12 +50,16 @@ class RendererAdapter(ABC):
             self.connection_detail = "Disabled"
             return False
         cmd = self.build_command(cfg, alsa_device)
+        env = os.environ.copy()
+        env.setdefault("HOME", "/root")
+        env.setdefault("XDG_CONFIG_HOME", "/etc/hydrasound")
         try:
             self._proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                env=env,
             )
             self.connection_status = "advertising"
             self.connection_detail = "Discoverable on LAN"
