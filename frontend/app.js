@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 let currentMuted = false;
+let currentVolumeMode = "disabled";
 
 function showToast(msg) {
   const t = $("toast");
@@ -70,6 +71,7 @@ function updateLiveUI(data) {
   $("outgoing-format").textContent = formatStream(stream.outgoing_rate, stream.outgoing_bit_depth, stream.outgoing_format);
 
   $("vol-mode-badge").textContent = data.usb_safety_muted ? "MUTED (USB SAFETY)" : volume.mode.toUpperCase();
+  currentVolumeMode = volume.mode;
   const usbBanner = $("usb-safety-banner");
   if (usbBanner) usbBanner.hidden = !data.usb_safety_muted;
   const hwBanner = $("hw-volume-error-banner");
@@ -348,9 +350,20 @@ $("btn-audio-caps").addEventListener("click", async () => {
 });
 
 $("btn-test-tone").addEventListener("click", async () => {
+  const isStopping = $("btn-test-tone").classList.contains("btn-danger");
+  if (!isStopping && currentVolumeMode === "disabled") {
+    const ok = window.confirm(
+      "Volume Mode is set to Disabled (0 dB full-scale pass-through).\n\n" +
+      "The 440 Hz test tone will play at 0 dBFS. Make sure your downstream amplifier or preamp volume is turned down before continuing."
+    );
+    if (!ok) return;
+  }
   const res = await api("/api/audio/test-tone", "POST");
   if (res.playing) {
-    showToast(`Test tone playing at ${res.volume.current_volume}% volume`);
+    const msg = currentVolumeMode === "disabled"
+      ? "Test tone playing (0 dB pass-through)"
+      : `Test tone playing at ${res.volume.current_volume}% volume`;
+    showToast(msg);
   } else {
     showToast("Test tone stopped");
   }
