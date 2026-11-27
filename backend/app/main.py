@@ -22,7 +22,7 @@ from app.ir.controller import IRManager
 from app.network.manager import NetworkManager
 from app.orchestrator.manager import StreamOrchestrator
 from app.system.logger import Rolling500FileHandler
-from app.system.monitor import get_system_metrics
+from app.system.monitor import get_app_version_info, get_system_metrics
 from app.volume.controller import VolumeController
 
 logging.basicConfig(
@@ -45,6 +45,12 @@ async def lifespan(app: FastAPI):
     )
     root_logger = logging.getLogger()
     root_logger.addHandler(log_handler)
+    ver_info = get_app_version_info()
+    logger.info(
+        "Hydra Sound starting (version=%s, commit=%s)",
+        ver_info.get("version", "unknown"),
+        ver_info.get("commit", "unknown"),
+    )
 
     camilla = CamillaDSPManager()
     pipeline = AudioPipelineManager(camilla)
