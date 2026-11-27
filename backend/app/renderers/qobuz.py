@@ -129,6 +129,7 @@ class QobuzRenderer(RendererAdapter):
             self._pending_settings = []
 
             def _apply() -> None:
+                time.sleep(1.0)
                 for key, value in pairs:
                     try:
                         subprocess.run(
