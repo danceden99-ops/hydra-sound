@@ -501,6 +501,12 @@ function updateIrStatusText(irStatus) {
   } else {
     $("flirc-status").textContent = "IR Receiver is Disabled. Select FLIRC or GPIO and save to learn remote keys.";
   }
+  const actEl = $("ir-activity-log");
+  if (actEl) {
+    const lines = irStatus.activity || [];
+    actEl.textContent = lines.length ? lines.join("\n") : "No IR activity recorded yet.";
+    actEl.scrollTop = actEl.scrollHeight;
+  }
 }
 
 $("ir-mode").addEventListener("change", async () => {
@@ -525,13 +531,18 @@ document.querySelectorAll("[data-learn]").forEach((btn) => {
   btn.addEventListener("click", async () => {
     const mode = $("ir-mode").value;
     $("flirc-learn-msg").textContent = `Point remote at ${mode === "gpio" ? "GPIO IR receiver" : "FLIRC"} and press button for ${btn.dataset.learn}…`;
-    const res = await api("/api/ir/learn", "POST", { action: btn.dataset.learn, mode });
-    $("flirc-learn-msg").textContent = res.ok
-      ? `Learned ${btn.dataset.learn}${res.hex ? ` (${res.hex})` : ""}!`
-      : (res.error || res.output);
+    const pollId = setInterval(async () => {
+      try { updateIrStatusText(await api("/api/ir/status")); } catch {}
+    }, 1000);
     try {
-      updateIrStatusText(await api("/api/ir/status"));
-    } catch {}
+      const res = await api("/api/ir/learn", "POST", { action: btn.dataset.learn, mode });
+      $("flirc-learn-msg").textContent = res.ok
+        ? `Learned ${btn.dataset.learn}${res.hex ? ` (${res.hex})` : ""}!`
+        : (res.error || res.output);
+    } finally {
+      clearInterval(pollId);
+      try { updateIrStatusText(await api("/api/ir/status")); } catch {}
+    }
   });
 });
 

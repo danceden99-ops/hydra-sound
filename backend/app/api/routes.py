@@ -406,6 +406,7 @@ async def get_ir_status(request: Request) -> dict:
         "config": cfg.ir.model_dump(),
         "flirc": state.ir_manager.get_flirc_status(),
         "gpio": state.ir_manager.get_gpio_status(cfg.ir),
+        "activity": state.ir_manager.get_activity_log(),
     }
 
 
@@ -427,7 +428,11 @@ async def learn_ir(payload: FlircLearnRequest, request: Request) -> dict:
     cfg: HydraConfig = state.config_store.get()
     mode = payload.mode or cfg.ir.mode
     if mode == "gpio":
-        res = await asyncio.to_thread(state.ir_manager.learn_gpio_command, payload.action)
+        res = await asyncio.to_thread(
+            state.ir_manager.learn_gpio_command,
+            payload.action,
+            cfg.ir.gpio_keymap,
+        )
         if res.get("ok") and "scancode" in res:
             cfg.ir.gpio_keymap[payload.action] = int(res["scancode"])
             state.config_store.save(cfg)

@@ -11,6 +11,7 @@ import struct
 import subprocess
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional
 
@@ -68,6 +69,17 @@ class IRManager:
         self._learning_action: Optional[str] = None
         self._stop_event = threading.Event()
         self._listener_thread: Optional[threading.Thread] = None
+        self._activity_lock = threading.Lock()
+        self._activity_log: deque[str] = deque(maxlen=40)
+
+    def _record_activity(self, msg: str) -> None:
+        ts = time.strftime("%H:%M:%S")
+        with self._activity_lock:
+            self._activity_log.append(f"[{ts}] {msg}")
+
+    def get_activity_log(self) -> List[str]:
+        with self._activity_lock:
+            return list(self._activity_log)
 
     def start_listener(
         self,
@@ -160,7 +172,13 @@ class IRManager:
                     offset += _INPUT_EVENT_SIZE
                     action: Optional[str] = None
                     if ev_type == _EV_MSC and code == _MSC_SCAN and mode == "gpio":
-                        action = scan_to_action.get(int(value))
+                        scancode = int(value)
+                        action = scan_to_action.get(scancode)
+                        if not action:
+                            self._record_activity(
+                                f"GPIO unmapped IR scancode {hex(scancode)} (ignored)"
+                            )
+                            continue
                     elif ev_type == _EV_KEY and value == 1:
                         if code == _KEY_VOLUMEUP:
                             action = "vol_up"
@@ -182,6 +200,10 @@ class IRManager:
                         value,
                         action,
                     )
+                    self._record_activity(
+                        f"{mode.upper()} IR -> {action}"
+                        + (f" ({hex(int(value))})" if ev_type == _EV_MSC else f" (key={code})")
+                    )
                     asyncio.run_coroutine_threadsafe(on_action(action), loop)
 
         _close_all()
@@ -196,18 +218,24 @@ class IRManager:
             "learning": self._learning_action,
         }
 
-    def learn_gpio_command(self, action: str, timeout: float = 15.0) -> Dict[str, object]:
-        """Capture a raw MSC_SCAN (or EV_KEY) code from the GPIO IR input device."""
+    def learn_gpio_command(
+        self,
+        action: str,
+        existing_keymap: Optional[Dict[str, int]] = None,
+        timeout: float = 15.0,
+    ) -> Dict[str, object]:
+        """Capture 2 matching MSC_SCAN frames from GPIO IR, check duplicates, and drain repeats."""
         if action not in FLIRC_ACTION_TO_KEY:
             return {"ok": False, "error": f"Unsupported IR action: {action}"}
         devices = _find_ir_event_devices("gpio")
         if not devices:
-            return {
-                "ok": False,
-                "action": action,
-                "error": "No GPIO IR receiver found (/dev/input/event*). Save GPIO mode and reboot first.",
-            }
+            msg = "No GPIO IR receiver found (/dev/input/event*). Save GPIO mode and reboot first."
+            self._record_activity(f"GPIO learn '{action}' failed: {msg}")
+            return {"ok": False, "action": action, "error": msg}
         self._learning_action = action
+        self._record_activity(
+            f"Learning '{action}' (GPIO) — press button (waiting for 2 matching frames)…"
+        )
         fds: Dict[int, Path] = {}
         try:
             time.sleep(0.15)  # allow _listen_loop to release fds
@@ -218,20 +246,21 @@ class IRManager:
                 except OSError:
                     pass
             if not fds:
-                return {
-                    "ok": False,
-                    "action": action,
-                    "error": f"Unable to open GPIO IR input device ({devices[0]}).",
-                }
-            # Drain any stale buffered events before waiting
-            for fd in list(fds):
-                try:
-                    while os.read(fd, _INPUT_EVENT_SIZE * 16):
+                msg = f"Unable to open GPIO IR input device ({devices[0]})."
+                self._record_activity(f"GPIO learn '{action}' failed: {msg}")
+                return {"ok": False, "action": action, "error": msg}
+
+            def _drain_fds() -> None:
+                for d_fd in list(fds):
+                    try:
+                        while os.read(d_fd, _INPUT_EVENT_SIZE * 16):
+                            pass
+                    except (BlockingIOError, OSError):
                         pass
-                except BlockingIOError:
-                    pass
-                except OSError:
-                    pass
+
+            _drain_fds()
+            first_code: Optional[int] = None
+            first_ts: float = 0.0
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 remaining = max(0.05, min(0.5, deadline - time.monotonic()))
@@ -239,9 +268,7 @@ class IRManager:
                 for fd in readable:
                     try:
                         data = os.read(fd, _INPUT_EVENT_SIZE * 16)
-                    except BlockingIOError:
-                        continue
-                    except OSError:
+                    except (BlockingIOError, OSError):
                         continue
                     offset = 0
                     while offset + _INPUT_EVENT_SIZE <= len(data):
@@ -249,18 +276,47 @@ class IRManager:
                             _INPUT_EVENT_FMT, data, offset
                         )
                         offset += _INPUT_EVENT_SIZE
-                        if ev_type == _EV_MSC and code == _MSC_SCAN:
-                            scancode = int(value)
+                        if ev_type != _EV_MSC or code != _MSC_SCAN:
+                            continue
+                        scancode = int(value)
+                        now = time.monotonic()
+                        if first_code == scancode and (now - first_ts) <= 1.2:
+                            dup_action = next(
+                                (
+                                    k
+                                    for k, v in (existing_keymap or {}).items()
+                                    if k != action and int(v) == scancode
+                                ),
+                                None,
+                            )
+                            time.sleep(0.25)
+                            _drain_fds()
+                            if dup_action:
+                                err = (
+                                    f"Button ({hex(scancode)}) is already assigned to '{dup_action}'. "
+                                    "Press a different button or Clear Learned Keys."
+                                )
+                                self._record_activity(f"GPIO learn '{action}' rejected: {err}")
+                                return {"ok": False, "action": action, "error": err}
+                            self._record_activity(
+                                f"Confirmed '{action}' -> {hex(scancode)} (trailing repeats drained)"
+                            )
                             return {
                                 "ok": True,
                                 "action": action,
                                 "scancode": scancode,
                                 "hex": hex(scancode),
                             }
+                        first_code = scancode
+                        first_ts = now
+                        self._record_activity(
+                            f"Captured frame 1/2 for '{action}': {hex(scancode)} — confirm with repeat/tap"
+                        )
+            self._record_activity(f"GPIO learn '{action}' timed out (15s).")
             return {
                 "ok": False,
                 "action": action,
-                "error": "Timed out waiting for IR remote button press (15s).",
+                "error": "Timed out waiting for 2 matching IR frames (15s).",
             }
         finally:
             for fd in list(fds):
