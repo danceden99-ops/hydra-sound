@@ -671,7 +671,7 @@ function loadEQState(eq) {
   const quick = $("eq-quick-select");
   const sel = $("eq-preset-select");
   if (quick) {
-    quick.innerHTML = '<option value="off">Off (Bit-Perfect)</option>';
+    quick.innerHTML = '<option value="off">Off</option>';
     (eqState.presets || []).forEach((p) => {
       const opt = document.createElement("option");
       opt.value = p.id;
