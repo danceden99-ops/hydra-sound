@@ -250,11 +250,10 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         curve_changed = cfg.volume.curve != payload.curve
         if payload.mode != "disabled":
             payload.usb_disabled_confirmed = False
-        if "current_volume" not in payload.model_fields_set:
-            payload.current_volume = prev_vol
-        if "muted" not in payload.model_fields_set:
-            payload.muted = prev_muted
-        cfg.volume = payload
+        for field_name in payload.model_fields:
+            if field_name in ("current_volume", "muted") and field_name not in payload.model_fields_set:
+                continue
+            setattr(cfg.volume, field_name, getattr(payload, field_name))
         cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
             cfg.volume.power_on_volume, cfg.volume
         )
@@ -286,6 +285,7 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
                 cfg.audio,
                 cfg.volume,
                 capture_rate=state.orchestrator._active_capture_rate,
+                eq_cfg=cfg.eq,
             )
         if cfg.volume.mode != "hardware":
             await state.volume_controller._apply_locked(cfg.audio, cfg.volume)

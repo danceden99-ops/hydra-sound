@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, Optional
 
 from app.audio.alsa import probe_active_hw_params
+from app.audio.camilladsp import has_alsa_cdsp
 from app.audio.pipeline import AudioPipelineManager
 from app.config import HydraConfig
 from app.renderers.airplay import AirPlayRenderer
@@ -70,7 +71,17 @@ class StreamOrchestrator:
         self._current_alsa_device = self.pipeline.apply(
             cfg.audio, cfg.volume, eq_cfg=cfg.eq
         )
-        self._active_capture_rate = 44100
+        preset = cfg.eq.get_active_preset() if cfg.eq.has_active_processing() else None
+        if (
+            preset
+            and (preset.left_impulse_path or preset.right_impulse_path)
+            and preset.impulse_sample_rate
+        ):
+            self._active_capture_rate = preset.impulse_sample_rate
+        elif cfg.audio.resample_enabled:
+            self._active_capture_rate = cfg.audio.resample_rate
+        else:
+            self._active_capture_rate = 44100
         for rid, renderer in self.renderers.items():
             if renderer.is_enabled(cfg):
                 renderer.start(cfg, self._current_alsa_device)
@@ -173,6 +184,7 @@ class StreamOrchestrator:
                     8000 <= incoming_rate <= 768000
                     and incoming_rate != self._active_capture_rate
                     and self.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+                    and not has_alsa_cdsp()
                 ):
                     self._active_capture_rate = incoming_rate
                     self.pipeline.apply(

@@ -20,6 +20,14 @@ from app.config import AudioOutputConfig, RoomEQConfig, VolumeConfig
 
 logger = logging.getLogger(__name__)
 
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Atomically write text via a sibling temp file and os.replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
+
 def _default_camilla_config_path() -> Path:
     cfg_env = os.environ.get("HYDRA_CONFIG_PATH")
     if cfg_env:
@@ -108,10 +116,10 @@ def build_camilladsp_config(
         if audio_cfg.resample_enabled
         else select_best_pcm_format(audio_cfg.device_id)
     )
-    if audio_cfg.resample_enabled:
-        target_rate: int | str = audio_cfg.resample_rate
-    elif fir_rate is not None:
-        target_rate = fir_rate
+    if fir_rate is not None:
+        target_rate: int | str = fir_rate
+    elif audio_cfg.resample_enabled:
+        target_rate = audio_cfg.resample_rate
     else:
         target_rate = capture_rate
 
@@ -126,10 +134,10 @@ def build_camilladsp_config(
             playback_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
 
     if use_alsa_cdsp:
-        if audio_cfg.resample_enabled:
-            samplerate_val: int | str = audio_cfg.resample_rate
-        elif fir_rate is not None:
-            samplerate_val = fir_rate
+        if fir_rate is not None:
+            samplerate_val: int | str = fir_rate
+        elif audio_cfg.resample_enabled:
+            samplerate_val = audio_cfg.resample_rate
         else:
             samplerate_val = "$samplerate$"
         rate_num = samplerate_val if isinstance(samplerate_val, int) else 96000
@@ -256,6 +264,21 @@ def build_camilladsp_config(
                 "parameters": {"type": "Wav", "filename": preset.right_impulse_path, "channel": 0},
             }
             pipeline.append({"type": "Filter", "channels": [1], "names": ["eq_fir_r"]})
+        if (
+            bool(preset.left_impulse_path) != bool(preset.right_impulse_path)
+            and preset.impulse_taps > 0
+            and preset.impulse_sample_rate > 0
+        ):
+            fir_delay_ms = round(
+                (preset.impulse_taps / (2.0 * preset.impulse_sample_rate)) * 1000.0, 4
+            )
+            if fir_delay_ms > 0.0:
+                opp_ch = [1] if preset.left_impulse_path else [0]
+                filters["eq_fir_skew_comp"] = {
+                    "type": "Delay",
+                    "parameters": {"delay": fir_delay_ms, "unit": "ms", "subsample": True},
+                }
+                pipeline.append({"type": "Filter", "channels": opp_ch, "names": ["eq_fir_skew_comp"]})
 
     if volume_cfg.mode == "software":
         eff_max = get_effective_max_volume(volume_cfg)
@@ -315,14 +338,13 @@ class CamillaDSPManager:
 
     def write_statefile(self, db: float, muted: bool) -> None:
         """Persist Aux1 volume & mute into CamillaDSP statefile for alsa_cdsp spawns."""
-        self.statefile_path.parent.mkdir(parents=True, exist_ok=True)
         state_data = {
             "config_path": str(self.config_path),
             "mute": [False, bool(muted), False, False, False],
             "volume": [0.0, round(float(db), 2), 0.0, 0.0, 0.0],
         }
-        self.statefile_path.write_text(
-            yaml.safe_dump(state_data, sort_keys=False), encoding="utf-8"
+        _atomic_write_text(
+            self.statefile_path, yaml.safe_dump(state_data, sort_keys=False)
         )
 
     def render_cdsp_template(
@@ -350,10 +372,9 @@ class CamillaDSPManager:
         """Configure alsa_cdsp template, config_cmd script, and /etc/asound.conf."""
         self.stop()
         self._cdsp_mode = True
-        self.template_path.parent.mkdir(parents=True, exist_ok=True)
-        self.template_path.write_text(
+        _atomic_write_text(
+            self.template_path,
             self.render_cdsp_template(audio_cfg, volume_cfg, eq_cfg=eq_cfg),
-            encoding="utf-8",
         )
         if volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed:
             self.write_statefile(-80.0, True)
@@ -403,11 +424,10 @@ class CamillaDSPManager:
         capture_rate: int = 44100,
         eq_cfg: Optional[RoomEQConfig] = None,
     ) -> Path:
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
         data = build_camilladsp_config(
             audio_cfg, volume_cfg, capture_rate=capture_rate, eq_cfg=eq_cfg
         )
-        self.config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        _atomic_write_text(self.config_path, yaml.safe_dump(data, sort_keys=False))
         return self.config_path
 
     def start(
@@ -434,8 +454,7 @@ class CamillaDSPManager:
             return
 
         self.stop()
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(new_yaml, encoding="utf-8")
+        _atomic_write_text(self.config_path, new_yaml)
         cmd = [
             "camilladsp",
             "-p",

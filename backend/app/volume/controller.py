@@ -26,9 +26,11 @@ class VolumeController:
         self,
         camilla: CamillaDSPManager,
         on_volume_changed: Optional[Callable[[int, bool], None]] = None,
+        on_hardware_error: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.camilla = camilla
         self.on_volume_changed = on_volume_changed
+        self.on_hardware_error = on_hardware_error
         self._lock = asyncio.Lock()
         self.hardware_error: Optional[str] = None
 
@@ -118,7 +120,9 @@ class VolumeController:
         vol_cfg.current_volume = self.clamp_volume(vol_cfg.current_volume, vol_cfg)
 
         if vol_cfg.mode == "hardware":
-            self._apply_hardware_alsa(audio_cfg.device_id, vol_cfg)
+            await asyncio.to_thread(
+                self._apply_hardware_alsa, audio_cfg.device_id, vol_cfg
+            )
             if self.hardware_error:
                 await self.camilla.set_volume_db(-80.0, muted=True)
         elif vol_cfg.mode == "software":
@@ -145,7 +149,14 @@ class VolumeController:
             out = res.stdout or ""
             has_pvol = "pvolume" in out.lower() or "playback channels:" in out.lower()
             db_vals = [float(x) for x in re.findall(r"\[(-?\d+(?:\.\d+)?)dB\]", out)]
-            has_db = bool(db_vals) and max(db_vals) <= 0.05
+            limit_dbs = [
+                float(x)
+                for line in out.splitlines()
+                if "limits:" in line.lower()
+                for x in re.findall(r"(-?\d+(?:\.\d+)?)\s*dB", line, re.IGNORECASE)
+            ]
+            all_dbs = db_vals + limit_dbs
+            has_db = bool(all_dbs) and max(all_dbs) <= 0.05
             return has_pvol, has_db
         except Exception:
             return False, False
@@ -233,9 +244,13 @@ class VolumeController:
                 self.hardware_error = (
                     f"ALSA hardware mixer '{mixer}' failed on card {card}: {err}"
                 )
-                logger.warning(self.hardware_error)
+                logger.error(self.hardware_error)
+                if self.on_hardware_error:
+                    self.on_hardware_error(self.hardware_error)
             else:
                 self.hardware_error = None
         except Exception as exc:
             self.hardware_error = f"ALSA hardware mixer update failed: {exc}"
-            logger.warning(self.hardware_error)
+            logger.error(self.hardware_error)
+            if self.on_hardware_error:
+                self.on_hardware_error(self.hardware_error)

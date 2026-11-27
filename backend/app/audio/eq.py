@@ -277,8 +277,12 @@ def compute_max_boost_db(
     bands: Iterable[EQBand], channel: str, impulse_peak_db: float = 0.0
 ) -> float:
     """Return worst-case positive boost (dB) across 20 Hz - 20 kHz for headroom pre-gain."""
-    grid = [20.0 * (1000.0 ** (i / 199.0)) for i in range(200)]
-    total_db = evaluate_bands_db(bands, channel, grid)
+    band_list = list(bands)
+    grid = [20.0 * (1000.0 ** (i / 399.0)) for i in range(400)]
+    for b in band_list:
+        if b.enabled and b.channel in ("both", channel) and b.freq > 0.0:
+            grid.append(float(b.freq))
+    total_db = evaluate_bands_db(band_list, channel, grid)
     biquad_peak = max([0.0] + total_db)
     return round(biquad_peak + max(0.0, float(impulse_peak_db)), 2)
 
@@ -436,14 +440,14 @@ def _parse_wav_bytes(raw: bytes, channel_idx: int = 0) -> Tuple["np.ndarray", in
     return arr, int(sample_rate)
 
 
-def _write_float32_wav(path: Path, taps: "np.ndarray", sample_rate: int) -> None:
-    """Write mono 32-bit IEEE float WAV impulse file for CamillaDSP Conv."""
+def _write_float64_wav(path: Path, taps: "np.ndarray", sample_rate: int) -> None:
+    """Write mono 64-bit IEEE float WAV impulse file for CamillaDSP Conv."""
     import numpy as np
     path.parent.mkdir(parents=True, exist_ok=True)
-    f32 = np.asarray(taps, dtype="<f4")
-    pcm_bytes = f32.tobytes()
+    f64 = np.asarray(taps, dtype="<f8")
+    pcm_bytes = f64.tobytes()
     data_size = len(pcm_bytes)
-    byte_rate = sample_rate * 4
+    byte_rate = sample_rate * 8
     header = struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF",
@@ -455,8 +459,8 @@ def _write_float32_wav(path: Path, taps: "np.ndarray", sample_rate: int) -> None
         1,  # mono
         sample_rate,
         byte_rate,
-        4,  # block align
-        32,
+        8,  # block align
+        64,
         b"data",
         data_size,
     )
@@ -472,7 +476,7 @@ def import_rephase_impulse(
     channel_idx: int = 0,
     impulses_dir: Optional[Path] = None,
 ) -> Tuple[Path, int, int, float]:
-    """Validate and save a rePhase FIR impulse (.wav/.txt/.bin) as mono 32-bit float WAV.
+    """Validate and save a rePhase FIR impulse (.wav/.txt/.bin) as mono 64-bit float WAV.
 
     Returns (saved_path, sample_rate, tap_count, peak_gain_db).
     """
@@ -521,5 +525,5 @@ def import_rephase_impulse(
     out_dir = impulses_dir or default_impulses_dir()
     safe_side = "left" if side == "left" else "right"
     out_path = out_dir / f"{preset_id}_{safe_side}.wav"
-    _write_float32_wav(out_path, taps, sr)
+    _write_float64_wav(out_path, taps, sr)
     return out_path, sr, int(len(taps)), peak_gain_db

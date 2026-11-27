@@ -503,13 +503,43 @@ def test_qobuz_set_client_volume_normalized_scale(monkeypatch) -> None:
 
 def test_partial_volume_config_preserves_live_volume_and_mute() -> None:
     with TestClient(app) as client:
-        client.put("/api/volume", json={"volume": 12})
+        client.put("/api/config/volume", json={"mode": "software", "max_volume": 80})
+        client.post("/api/volume/set", json={"volume": 12})
         client.post("/api/volume/mute")
         res = client.put("/api/config/volume", json={"mode": "software", "max_volume": 65})
         assert res.status_code == 200
         vol = res.json()["volume"]
         assert vol["current_volume"] == 12
         assert vol["muted"] is True
+
+
+def test_fir_rate_precedence_over_resample_and_skew_comp() -> None:
+    from app.audio.camilladsp import build_camilladsp_config
+    from app.config import EQPreset, RoomEQConfig
+
+    preset = EQPreset(
+        id="fir_test",
+        name="FIR Test",
+        left_impulse_path="/tmp/left.wav",
+        impulse_sample_rate=48000,
+        impulse_taps=4800,
+    )
+    eq_cfg = RoomEQConfig(enabled=True, active_preset_id="fir_test", presets=[preset])
+    audio_cfg = AudioOutputConfig(device_id="hw:1,0", resample_enabled=True, resample_rate=192000)
+    vol_cfg = VolumeConfig(mode="software")
+
+    cfg = build_camilladsp_config(audio_cfg, vol_cfg, capture_rate=44100, eq_cfg=eq_cfg)
+    assert cfg["devices"]["samplerate"] == 48000
+    assert "eq_fir_skew_comp" in cfg["filters"]
+    assert cfg["filters"]["eq_fir_skew_comp"]["parameters"]["delay"] == 50.0
+
+
+def test_compute_max_boost_db_hits_high_q_center() -> None:
+    from app.audio.eq import compute_max_boost_db
+    from app.config import EQBand
+
+    bands = [EQBand(enabled=True, channel="both", type="Peaking", freq=137.0, gain=6.0, q=18.0)]
+    assert compute_max_boost_db(bands, "both") >= 5.95
 
 
 def test_bit_depth_24_resolves_s24_4_rj_le_and_format_cache_clears(monkeypatch) -> None:

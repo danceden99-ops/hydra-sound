@@ -49,11 +49,12 @@ async def lifespan(app: FastAPI):
     )
     root_logger = logging.getLogger()
     root_logger.addHandler(log_handler)
-    ver_info = get_app_version_info()
+    ver_info = await get_app_version_info(configured_repo=cfg.system.github_repo)
     logger.info(
-        "Hydra Sound starting (version=%s, commit=%s)",
-        ver_info.get("version", "unknown"),
-        ver_info.get("commit", "unknown"),
+        "Hydra Sound starting (version=%s, tag=%s, commit=%s)",
+        ver_info.get("app_version", "unknown"),
+        ver_info.get("git_tag", "unknown"),
+        ver_info.get("git_commit", "unknown"),
     )
 
     camilla = CamillaDSPManager()
@@ -168,17 +169,18 @@ async def lifespan(app: FastAPI):
             while pending_client_vol["value"] is not None:
                 pct = pending_client_vol["value"]
                 pending_client_vol["value"] = None
-                cur_cfg = config_store.get()
-                if cur_cfg.volume.mode == "disabled":
-                    continue
-                clamped = volume_controller.clamp_volume(pct, cur_cfg.volume)
-                await volume_controller.set_volume(
-                    pct,
-                    cur_cfg.audio,
-                    cur_cfg.volume,
-                    notify_client=(clamped != pct),
-                )
-                config_store.save(cur_cfg)
+                async with volume_controller._lock:
+                    cur_cfg = config_store.get()
+                    if cur_cfg.volume.mode == "disabled":
+                        continue
+                    clamped = volume_controller.clamp_volume(pct, cur_cfg.volume)
+                    cur_cfg.volume.current_volume = clamped
+                    await volume_controller._apply_locked(
+                        cur_cfg.audio,
+                        cur_cfg.volume,
+                        notify_client=(clamped != pct),
+                    )
+                    config_store.save(cur_cfg)
         finally:
             client_vol_task_active = False
 
@@ -241,8 +243,14 @@ async def ws_status(websocket: WebSocket) -> None:
                     "volume": cfg.volume.model_dump(),
                     "audio": cfg.audio.model_dump(),
                     "system": get_system_metrics(),
-                    "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume),
+                    "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq),
+                    "eq": cfg.eq.model_dump(),
                     "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
+                    "hardware_volume_error": state.volume_controller.hardware_error,
+                    "test_tone_active": (
+                        getattr(state, "test_tone_proc", None) is not None
+                        and state.test_tone_proc.poll() is None
+                    ),
                     "renderers": state.orchestrator.get_renderers_status(cfg),
                 }
             )
