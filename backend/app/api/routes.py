@@ -253,9 +253,10 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
     state = request.app.state
     async with state.volume_controller._lock:
         cfg: HydraConfig = state.config_store.get()
+        prev_mode = cfg.volume.mode
         prev_vol = cfg.volume.current_volume
         prev_muted = cfg.volume.muted
-        mode_changed = cfg.volume.mode != payload.mode
+        mode_changed = prev_mode != payload.mode
         max_changed = cfg.volume.max_volume != payload.max_volume
         curve_changed = cfg.volume.curve != payload.curve
         if "mode" in payload.model_fields_set and payload.mode != "disabled":
@@ -263,6 +264,11 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         for field_name in payload.model_fields_set:
             if field_name in payload.model_fields:
                 setattr(cfg.volume, field_name, getattr(payload, field_name))
+        if mode_changed and {prev_mode, cfg.volume.mode} == {"hardware", "software"}:
+            safe_cap = 25 if cfg.volume.curve == "linear" else 70
+            if cfg.volume.max_volume > safe_cap:
+                cfg.volume.max_volume = safe_cap
+                max_changed = True
         if curve_changed and cfg.volume.curve == "linear" and cfg.volume.max_volume > 25:
             cfg.volume.max_volume = 25
             max_changed = True

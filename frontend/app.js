@@ -376,6 +376,25 @@ $("btn-test-tone").addEventListener("click", async () => {
   }
 });
 
+$("vol-mode").addEventListener("change", () => {
+  const newMode = $("vol-mode").value;
+  if (
+    (currentVolumeMode === "hardware" && newMode === "software") ||
+    (currentVolumeMode === "software" && newMode === "hardware")
+  ) {
+    const safeDefault = $("vol-curve").value === "linear" ? 25 : 70;
+    if (Number($("vol-max").value) > safeDefault) {
+      $("vol-max").value = safeDefault;
+    }
+    if (Number($("vol-power-on").value) > safeDefault) {
+      $("vol-power-on").value = safeDefault;
+    }
+    alert(
+      `Volume mode changed: Hardware and Software modes can produce different output levels at the same %.\n\nMax Volume has been reset to a safe default (${safeDefault}%) — please verify it for your system.`
+    );
+  }
+});
+
 $("vol-curve").addEventListener("change", () => {
   const curve = $("vol-curve").value;
   if (curve === "linear") {
@@ -528,10 +547,21 @@ function updateIrStatusText(irStatus) {
   const actEl = $("ir-activity-log");
   if (actEl) {
     const lines = irStatus.activity || [];
-    actEl.textContent = lines.length ? lines.join("\n") : "No IR activity recorded yet.";
-    actEl.scrollTop = actEl.scrollHeight;
+    const nextText = lines.length ? lines.join("\n") : "No IR activity recorded yet.";
+    if (actEl.textContent !== nextText) {
+      actEl.textContent = nextText;
+      actEl.scrollTop = actEl.scrollHeight;
+    }
   }
 }
+
+setInterval(async () => {
+  if ($("tab-ir")?.classList.contains("active")) {
+    try {
+      updateIrStatusText(await api("/api/ir/status"));
+    } catch {}
+  }
+}, 1500);
 
 $("ir-mode").addEventListener("change", async () => {
   try {

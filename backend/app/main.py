@@ -213,8 +213,40 @@ async def lifespan(app: FastAPI):
         if hasattr(renderer, "set_volume_callback"):
             renderer.set_volume_callback(_on_client_volume)
 
+    IDLE_VOLUME_RESET_SECONDS = 7200.0  # 2 hours of pause/stop
+
+    async def _idle_volume_watchdog() -> None:
+        last_playing_ts = loop.time()
+        idle_reset_done = False
+        while True:
+            await asyncio.sleep(60.0)
+            if orchestrator.stream.state == "playing":
+                last_playing_ts = loop.time()
+                idle_reset_done = False
+                continue
+            if not idle_reset_done and (loop.time() - last_playing_ts) >= IDLE_VOLUME_RESET_SECONDS:
+                idle_reset_done = True
+                async with volume_controller._lock:
+                    cur_cfg = config_store.get()
+                    if cur_cfg.volume.mode == "disabled":
+                        continue
+                    safe_cap = 25 if cur_cfg.volume.curve == "linear" else 70
+                    if cur_cfg.volume.current_volume > safe_cap:
+                        cur_cfg.volume.current_volume = safe_cap
+                        await volume_controller._apply_locked(
+                            cur_cfg.audio, cur_cfg.volume, notify_client=True
+                        )
+                        config_store.save(cur_cfg)
+                        logger.info(
+                            "Idle volume safety reset after 2h inactive: lowered volume to %d%%.",
+                            safe_cap,
+                        )
+
+    idle_watchdog_task = asyncio.create_task(_idle_volume_watchdog())
+
     yield
 
+    idle_watchdog_task.cancel()
     hotplug_monitor.stop()
     ir_manager.stop_listener()
     proc = getattr(app.state, "test_tone_proc", None)
