@@ -231,9 +231,12 @@ async def get_app_version_info(
     latest_github_tag = (
         await check_github_latest_release(github_repo) if github_repo else None
     )
+    resolved_version = app_version
+    if git_tag and git_tag.startswith("v") and "." in git_tag:
+        resolved_version = git_tag.lstrip("v").split("-", 1)[0]
     return {
-        "app_version": app_version,
-        "git_tag": git_tag or f"v{app_version}",
+        "app_version": resolved_version,
+        "git_tag": git_tag or f"v{resolved_version}",
         "git_commit": git_commit or "unknown",
         "github_repo": github_repo,
         "latest_github_tag": latest_github_tag,

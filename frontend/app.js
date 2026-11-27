@@ -288,7 +288,7 @@ async function loadInitialConfig() {
     : "File logging is disabled (SD card protection).";
   const latestTag = verInfo.latest_github_tag ? ` | Latest GitHub Release: ${verInfo.latest_github_tag}` : "";
   $("sys-version-info").textContent =
-    `App v${verInfo.app_version} (${verInfo.git_tag} / ${verInfo.git_commit})${latestTag} — Python ${verInfo.python_version}`;
+    `${verInfo.git_tag} (${verInfo.git_commit})${latestTag} — Python ${verInfo.python_version}`;
 }
 
 // Event bindings

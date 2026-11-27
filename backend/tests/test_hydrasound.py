@@ -172,7 +172,7 @@ def test_api_defaults_and_googlecast_disabled(tmp_path: Path, monkeypatch) -> No
         # Verify version endpoint & power action validation
         ver_resp = client.get("/api/system/version")
         assert ver_resp.status_code == 200
-        assert ver_resp.json()["app_version"] == "1.0.0"
+        assert bool(ver_resp.json()["app_version"])
 
         bad_power = client.post("/api/system/power", json={"action": "sleep"})
         assert bad_power.status_code == 400
