@@ -296,7 +296,15 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
     logger.info("Installing release %s from %s", clean_tag, repo.strip())
     try:
         fetch = subprocess.run(
-            ["git", "-C", str(repo_root), "fetch", "--tags", remote_url, clean_tag if clean_tag == "main" else f"refs/tags/{clean_tag}:refs/tags/{clean_tag}"],
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "fetch",
+                "--force",
+                remote_url,
+                clean_tag if clean_tag == "main" else f"refs/tags/{clean_tag}:refs/tags/{clean_tag}",
+            ],
             capture_output=True,
             text=True,
             timeout=60,
