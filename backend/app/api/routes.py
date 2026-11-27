@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import asdict
 from typing import Optional
@@ -74,6 +75,11 @@ class RendererEventRequest(BaseModel):
 
 class FlircLearnRequest(BaseModel):
     action: str  # vol_up | vol_down | mute
+    mode: Optional[str] = None  # optional override: flirc | gpio
+
+
+class IRClearRequest(BaseModel):
+    mode: Optional[str] = None
 
 
 class WiFiConnectRequest(BaseModel):
@@ -399,6 +405,7 @@ async def get_ir_status(request: Request) -> dict:
     return {
         "config": cfg.ir.model_dump(),
         "flirc": state.ir_manager.get_flirc_status(),
+        "gpio": state.ir_manager.get_gpio_status(cfg.ir),
     }
 
 
@@ -406,20 +413,52 @@ async def get_ir_status(request: Request) -> dict:
 async def update_ir_config(payload: IRConfig, request: Request) -> dict:
     state = request.app.state
     cfg: HydraConfig = state.config_store.get()
+    if "gpio_keymap" not in payload.model_fields_set:
+        payload.gpio_keymap = cfg.ir.gpio_keymap
     cfg.ir = payload
     state.config_store.save(cfg)
     gpio_res = state.ir_manager.apply_gpio_overlay(cfg.ir)
     return {"ok": True, "ir": cfg.ir.model_dump(), "gpio": gpio_res}
 
 
+@router.post("/ir/learn")
+async def learn_ir(payload: FlircLearnRequest, request: Request) -> dict:
+    state = request.app.state
+    cfg: HydraConfig = state.config_store.get()
+    mode = payload.mode or cfg.ir.mode
+    if mode == "gpio":
+        res = await asyncio.to_thread(state.ir_manager.learn_gpio_command, payload.action)
+        if res.get("ok") and "scancode" in res:
+            cfg.ir.gpio_keymap[payload.action] = int(res["scancode"])
+            state.config_store.save(cfg)
+        return res
+    if mode == "flirc":
+        return await asyncio.to_thread(state.ir_manager.learn_flirc_command, payload.action)
+    return {"ok": False, "error": "Enable FLIRC or GPIO IR mode and save before learning."}
+
+
+@router.post("/ir/clear")
+async def clear_ir(request: Request, payload: Optional[IRClearRequest] = None) -> dict:
+    state = request.app.state
+    cfg: HydraConfig = state.config_store.get()
+    mode = (payload.mode if payload else None) or cfg.ir.mode
+    if mode == "gpio":
+        cfg.ir.gpio_keymap = {}
+        state.config_store.save(cfg)
+        return {"ok": True, "message": "GPIO learned IR keys cleared."}
+    if mode == "flirc":
+        return await asyncio.to_thread(state.ir_manager.clear_flirc)
+    return {"ok": False, "error": "Enable FLIRC or GPIO IR mode first."}
+
+
 @router.post("/ir/flirc/learn")
 async def learn_flirc_ir(payload: FlircLearnRequest, request: Request) -> dict:
-    return request.app.state.ir_manager.learn_flirc_command(payload.action)
+    return await asyncio.to_thread(request.app.state.ir_manager.learn_flirc_command, payload.action)
 
 
 @router.post("/ir/flirc/clear")
 async def clear_flirc_ir(request: Request) -> dict:
-    return request.app.state.ir_manager.clear_flirc()
+    return await asyncio.to_thread(request.app.state.ir_manager.clear_flirc)
 
 
 @router.put("/config/network")

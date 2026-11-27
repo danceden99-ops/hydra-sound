@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -46,6 +46,7 @@ class IRConfig(BaseModel):
     flirc_key_vol_up: str = "KEY_VOLUMEUP"
     flirc_key_vol_down: str = "KEY_VOLUMEDOWN"
     flirc_key_mute: str = "KEY_MUTE"
+    gpio_keymap: Dict[str, int] = Field(default_factory=dict)
 
 
 class NetworkConfig(BaseModel):

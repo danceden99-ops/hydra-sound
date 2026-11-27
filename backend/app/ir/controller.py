@@ -30,6 +30,8 @@ FLIRC_ACTION_TO_KEY = {
 }
 
 _EV_KEY = 0x01
+_EV_MSC = 0x04
+_MSC_SCAN = 0x04
 _KEY_MUTE = 113
 _KEY_VOLUMEDOWN = 114
 _KEY_VOLUMEUP = 115
@@ -107,9 +109,13 @@ class IRManager:
         while not self._stop_event.is_set():
             try:
                 cfg = get_cfg()
-                mode = getattr(getattr(cfg, "ir", None), "mode", "disabled")
+                ir_cfg = getattr(cfg, "ir", None)
+                mode = getattr(ir_cfg, "mode", "disabled")
+                gpio_keymap = getattr(ir_cfg, "gpio_keymap", {}) or {}
             except Exception:
                 mode = "disabled"
+                gpio_keymap = {}
+            scan_to_action = {int(v): k for k, v in gpio_keymap.items()} if mode == "gpio" else {}
 
             if mode == "disabled" or self._learning_action is not None:
                 _close_all()
@@ -152,24 +158,117 @@ class IRManager:
                         _INPUT_EVENT_FMT, data, offset
                     )
                     offset += _INPUT_EVENT_SIZE
-                    if ev_type != _EV_KEY or value != 1:
+                    action: Optional[str] = None
+                    if ev_type == _EV_MSC and code == _MSC_SCAN and mode == "gpio":
+                        action = scan_to_action.get(int(value))
+                    elif ev_type == _EV_KEY and value == 1:
+                        if code == _KEY_VOLUMEUP:
+                            action = "vol_up"
+                        elif code == _KEY_VOLUMEDOWN:
+                            action = "vol_down"
+                        elif code == _KEY_MUTE:
+                            action = "mute"
+                    if not action:
                         continue
                     now = time.monotonic()
                     if now - last_action_ts < 0.15:
                         continue
-                    action: Optional[str] = None
-                    if code == _KEY_VOLUMEUP:
-                        action = "vol_up"
-                    elif code == _KEY_VOLUMEDOWN:
-                        action = "vol_down"
-                    elif code == _KEY_MUTE:
-                        action = "mute"
-                    if action:
-                        last_action_ts = now
-                        logger.info("IR key event (%s): code=%s -> %s", fds.get(fd), code, action)
-                        asyncio.run_coroutine_threadsafe(on_action(action), loop)
+                    last_action_ts = now
+                    logger.info(
+                        "IR event (%s): type=%s code=%s val=%s -> %s",
+                        fds.get(fd),
+                        ev_type,
+                        code,
+                        value,
+                        action,
+                    )
+                    asyncio.run_coroutine_threadsafe(on_action(action), loop)
 
         _close_all()
+
+    def get_gpio_status(self, ir_cfg: IRConfig) -> Dict[str, object]:
+        devices = [str(p) for p in _find_ir_event_devices("gpio")]
+        return {
+            "connected": bool(devices),
+            "devices": devices,
+            "gpio_pin": ir_cfg.gpio_pin,
+            "keymap": {k: hex(v) for k, v in (ir_cfg.gpio_keymap or {}).items()},
+            "learning": self._learning_action,
+        }
+
+    def learn_gpio_command(self, action: str, timeout: float = 15.0) -> Dict[str, object]:
+        """Capture a raw MSC_SCAN (or EV_KEY) code from the GPIO IR input device."""
+        if action not in FLIRC_ACTION_TO_KEY:
+            return {"ok": False, "error": f"Unsupported IR action: {action}"}
+        devices = _find_ir_event_devices("gpio")
+        if not devices:
+            return {
+                "ok": False,
+                "action": action,
+                "error": "No GPIO IR receiver found (/dev/input/event*). Save GPIO mode and reboot first.",
+            }
+        self._learning_action = action
+        fds: Dict[int, Path] = {}
+        try:
+            time.sleep(0.15)  # allow _listen_loop to release fds
+            for dev_path in devices:
+                try:
+                    fd = os.open(str(dev_path), os.O_RDONLY | os.O_NONBLOCK)
+                    fds[fd] = dev_path
+                except OSError:
+                    pass
+            if not fds:
+                return {
+                    "ok": False,
+                    "action": action,
+                    "error": f"Unable to open GPIO IR input device ({devices[0]}).",
+                }
+            # Drain any stale buffered events before waiting
+            for fd in list(fds):
+                try:
+                    while os.read(fd, _INPUT_EVENT_SIZE * 16):
+                        pass
+                except BlockingIOError:
+                    pass
+                except OSError:
+                    pass
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                remaining = max(0.05, min(0.5, deadline - time.monotonic()))
+                readable, _, _ = select.select(list(fds.keys()), [], [], remaining)
+                for fd in readable:
+                    try:
+                        data = os.read(fd, _INPUT_EVENT_SIZE * 16)
+                    except BlockingIOError:
+                        continue
+                    except OSError:
+                        continue
+                    offset = 0
+                    while offset + _INPUT_EVENT_SIZE <= len(data):
+                        _, _, ev_type, code, value = struct.unpack_from(
+                            _INPUT_EVENT_FMT, data, offset
+                        )
+                        offset += _INPUT_EVENT_SIZE
+                        if ev_type == _EV_MSC and code == _MSC_SCAN:
+                            scancode = int(value)
+                            return {
+                                "ok": True,
+                                "action": action,
+                                "scancode": scancode,
+                                "hex": hex(scancode),
+                            }
+            return {
+                "ok": False,
+                "action": action,
+                "error": "Timed out waiting for IR remote button press (15s).",
+            }
+        finally:
+            for fd in list(fds):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            self._learning_action = None
 
     def get_flirc_status(self) -> Dict[str, object]:
         try:

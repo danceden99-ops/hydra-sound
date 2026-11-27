@@ -256,7 +256,7 @@ async function loadInitialConfig() {
 
   $("ir-mode").value = cfg.ir.mode;
   $("ir-gpio-pin").value = cfg.ir.gpio_pin;
-  $("flirc-status").textContent = `FLIRC Connected: ${irStatus.flirc.connected ? "Yes" : "No"} (${irStatus.flirc.raw})`;
+  updateIrStatusText(irStatus);
 
   latestNetStatus = liveStatus.network || {};
   const netModeLabel = (latestNetStatus.mode || cfg.network.mode || "dhcp").toUpperCase();
@@ -488,25 +488,60 @@ $("btn-check-updates").addEventListener("click", async () => {
   });
 });
 
+function updateIrStatusText(irStatus) {
+  const mode = $("ir-mode").value;
+  if (mode === "gpio") {
+    const g = irStatus.gpio || {};
+    const keys = Object.entries(g.keymap || {}).map(([k, v]) => `${k}=${v}`).join(", ");
+    $("flirc-status").textContent =
+      `GPIO IR Receiver (Pin ${g.gpio_pin || $("ir-gpio-pin").value}): ${g.connected ? "Ready" : "Not detected (save & reboot)"}` +
+      (keys ? ` | Learned: ${keys}` : " | No keys learned yet");
+  } else if (mode === "flirc") {
+    $("flirc-status").textContent = `FLIRC Connected: ${irStatus.flirc.connected ? "Yes" : "No"} (${irStatus.flirc.raw})`;
+  } else {
+    $("flirc-status").textContent = "IR Receiver is Disabled. Select FLIRC or GPIO and save to learn remote keys.";
+  }
+}
+
+$("ir-mode").addEventListener("change", async () => {
+  try {
+    const irStatus = await api("/api/ir/status");
+    updateIrStatusText(irStatus);
+  } catch {}
+});
+
 $("save-ir").addEventListener("click", async () => {
   const res = await api("/api/config/ir", "PUT", {
     mode: $("ir-mode").value,
     gpio_pin: Number($("ir-gpio-pin").value),
   });
   showToast(res.gpio?.message || "IR settings saved");
+  try {
+    updateIrStatusText(await api("/api/ir/status"));
+  } catch {}
 });
 
 document.querySelectorAll("[data-learn]").forEach((btn) => {
   btn.addEventListener("click", async () => {
-    $("flirc-learn-msg").textContent = `Point remote at FLIRC and press button for ${btn.dataset.learn}…`;
-    const res = await api("/api/ir/flirc/learn", "POST", { action: btn.dataset.learn });
-    $("flirc-learn-msg").textContent = res.ok ? `Learned ${btn.dataset.learn}!` : (res.error || res.output);
+    const mode = $("ir-mode").value;
+    $("flirc-learn-msg").textContent = `Point remote at ${mode === "gpio" ? "GPIO IR receiver" : "FLIRC"} and press button for ${btn.dataset.learn}…`;
+    const res = await api("/api/ir/learn", "POST", { action: btn.dataset.learn, mode });
+    $("flirc-learn-msg").textContent = res.ok
+      ? `Learned ${btn.dataset.learn}${res.hex ? ` (${res.hex})` : ""}!`
+      : (res.error || res.output);
+    try {
+      updateIrStatusText(await api("/api/ir/status"));
+    } catch {}
   });
 });
 
 $("flirc-clear").addEventListener("click", async () => {
-  const res = await api("/api/ir/flirc/clear", "POST");
-  $("flirc-learn-msg").textContent = res.ok ? "FLIRC cleared." : res.error;
+  const mode = $("ir-mode").value;
+  const res = await api("/api/ir/clear", "POST", { mode });
+  $("flirc-learn-msg").textContent = res.ok ? (res.message || "Learned IR keys cleared.") : res.error;
+  try {
+    updateIrStatusText(await api("/api/ir/status"));
+  } catch {}
 });
 
 $("net-mode").addEventListener("change", updateStaticIpFieldsState);
