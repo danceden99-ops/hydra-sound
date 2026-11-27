@@ -41,8 +41,9 @@ _INPUT_EVENT_SIZE = struct.calcsize(_INPUT_EVENT_FMT)
 
 
 def _enable_gpio_ir_protocols() -> List[str]:
-    """Enable all hardware IR decoders (NEC, RC-5, RC-6, Sony, JVC, etc.) on /sys/class/rc/rc*."""
+    """Enable standard consumer IR decoders and disable noisy ones (imon/mce_kbd) on /sys/class/rc/rc*."""
     enabled: List[str] = []
+    noisy = {"lirc", "imon", "mce_kbd", "cec"}
     rc_root = Path("/sys/class/rc")
     if not rc_root.exists():
         return enabled
@@ -51,12 +52,18 @@ def _enable_gpio_ir_protocols() -> List[str]:
             text = proto_file.read_text(encoding="utf-8", errors="ignore")
             for tok in text.split():
                 clean = tok.strip("[]")
-                if clean and clean != "lirc" and not tok.startswith("["):
+                if not clean:
+                    continue
+                if clean in noisy and tok.startswith("["):
+                    try:
+                        proto_file.write_text(f"-{clean}\n", encoding="utf-8")
+                    except OSError:
+                        pass
+                elif clean not in noisy and not tok.startswith("["):
                     try:
                         proto_file.write_text(f"+{clean}\n", encoding="utf-8")
                     except OSError:
                         pass
-            # Read back active protocols
             after = proto_file.read_text(encoding="utf-8", errors="ignore")
             enabled.extend(t.strip("[]") for t in after.split() if t.startswith("["))
         except OSError:
@@ -202,6 +209,8 @@ class IRManager:
                     action: Optional[str] = None
                     if ev_type == _EV_MSC and code == _MSC_SCAN and mode == "gpio":
                         scancode = int(value)
+                        if scancode in (0x7FFFFFFF, 0xFFFFFFFF, -1):
+                            continue
                         action = scan_to_action.get(scancode)
                         if not action:
                             self._record_activity(
@@ -311,6 +320,8 @@ class IRManager:
                         if ev_type != _EV_MSC or code != _MSC_SCAN:
                             continue
                         scancode = int(value)
+                        if scancode in (0x7FFFFFFF, 0xFFFFFFFF, -1):
+                            continue
                         now = time.monotonic()
                         if first_code == scancode and (now - first_ts) <= 2.5:
                             dup_action = next(
@@ -330,6 +341,8 @@ class IRManager:
                                 )
                                 self._record_activity(f"GPIO learn '{action}' rejected: {err}")
                                 return {"ok": False, "action": action, "error": err}
+                            if existing_keymap is not None:
+                                existing_keymap[action] = scancode
                             self._record_activity(
                                 f"Confirmed '{action}' -> {hex(scancode)} (trailing repeats drained)"
                             )
