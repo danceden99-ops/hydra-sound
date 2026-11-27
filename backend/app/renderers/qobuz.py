@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import threading
 import time
 import urllib.request
+from pathlib import Path
 from typing import Callable, Optional
 
 from app.audio.alsa import format_named_alsa_device
@@ -35,6 +37,26 @@ def _post_qobuz_event(payload: dict) -> None:
     threading.Thread(target=_send, daemon=True).start()
 
 
+def _get_pibuz_toml_path() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / "pibuz" / "pibuz.toml"
+    etc_dir = Path("/etc/hydrasound")
+    if etc_dir.exists() and os.access(etc_dir, os.W_OK):
+        return etc_dir / "pibuz" / "pibuz.toml"
+    return Path(__file__).resolve().parents[2] / "data" / "pibuz" / "pibuz.toml"
+
+
+def _write_pibuz_toml() -> None:
+    """Restrict pibuz control plane to loopback (127.0.0.1) so LAN clients cannot bypass Hydra."""
+    toml_path = _get_pibuz_toml_path()
+    try:
+        toml_path.parent.mkdir(parents=True, exist_ok=True)
+        toml_path.write_text('[server]\nbind = "127.0.0.1"\n', encoding="utf-8")
+    except Exception:
+        pass
+
+
 class QobuzRenderer(RendererAdapter):
     meta = RendererMetadata(
         id="qobuz",
@@ -55,6 +77,7 @@ class QobuzRenderer(RendererAdapter):
         self._on_client_volume: Optional[Callable[[int], None]] = None
         self._last_pushed_at: float = 0.0
         self._last_reported_vol: Optional[int] = None
+        self._pending_settings: list[tuple[str, str]] = []
 
     def set_volume_callback(self, cb: Optional[Callable[[int], None]]) -> None:
         """Register callback invoked when the Qobuz app changes volume."""
@@ -101,6 +124,22 @@ class QobuzRenderer(RendererAdapter):
 
     def _update_connection_state(self, line: str) -> None:
         super()._update_connection_state(line)
+        if "control api listening on" in line.lower() and self._pending_settings:
+            pairs = list(self._pending_settings)
+            self._pending_settings = []
+
+            def _apply() -> None:
+                for key, value in pairs:
+                    try:
+                        subprocess.run(
+                            ["pibuz", "settings", "set", key, value],
+                            capture_output=True,
+                            timeout=3,
+                        )
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_apply, daemon=True).start()
         if "FILE_AUDIO_QUALITY_CHANGED" in line and "payload=" in line:
             try:
                 payload = json.loads(line.split("payload=", 1)[1].strip())
@@ -171,21 +210,14 @@ class QobuzRenderer(RendererAdapter):
             target_device = format_named_alsa_device(alsa_device, is_hdmi=is_hdmi)
             alsa_plugin = "plughw" if is_loopback else "hw"
 
-        # Apply device name, volume mode & ALSA settings via pibuz settings CLI before running daemon
+        _write_pibuz_toml()
+        # Queue device name, volume mode & ALSA settings; applied once pibuz control API is listening
         volume_mode = "locked" if cfg.volume.mode == "disabled" else "external"
-        for key, value in (
+        self._pending_settings = [
             ("qconnect.device_name", qc.device_name),
             ("qconnect.volume_mode", volume_mode),
             ("audio.backend", "alsa"),
             ("audio.alsa_plugin", alsa_plugin),
             ("audio.device", target_device),
-        ):
-            try:
-                subprocess.run(
-                    ["pibuz", "settings", "set", key, value],
-                    capture_output=True,
-                    timeout=3,
-                )
-            except Exception:
-                pass
+        ]
         return ["pibuz", "run"]
