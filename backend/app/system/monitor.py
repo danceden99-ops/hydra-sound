@@ -105,6 +105,20 @@ def _get_binary_version(cmd: list[str]) -> Optional[str]:
         return None
 
 
+def get_installed_module_versions(
+    renderers: Dict[str, RendererAdapter],
+) -> Dict[str, str]:
+    """Return local installed versions for all modular renderers + CamillaDSP (offline)."""
+    versions: Dict[str, str] = {}
+    for rid, adapter in renderers.items():
+        ver = adapter.get_installed_version()
+        if not ver and rid in _APT_MANAGED_PACKAGES:
+            ver, _ = _check_apt_package_versions(_APT_MANAGED_PACKAGES[rid])
+        versions[rid] = ver or "not installed"
+    versions["camilladsp"] = _get_binary_version(["camilladsp", "--version"]) or "not installed"
+    return versions
+
+
 async def check_all_module_updates(
     renderers: Dict[str, RendererAdapter],
 ) -> List[Dict[str, object]]:

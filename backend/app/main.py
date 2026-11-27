@@ -22,7 +22,11 @@ from app.ir.controller import IRManager
 from app.network.manager import NetworkManager
 from app.orchestrator.manager import StreamOrchestrator
 from app.system.logger import Rolling500FileHandler
-from app.system.monitor import get_app_version_info, get_system_metrics
+from app.system.monitor import (
+    get_app_version_info,
+    get_installed_module_versions,
+    get_system_metrics,
+)
 from app.volume.controller import VolumeController
 
 logging.basicConfig(
@@ -55,6 +59,11 @@ async def lifespan(app: FastAPI):
     camilla = CamillaDSPManager()
     pipeline = AudioPipelineManager(camilla)
     orchestrator = StreamOrchestrator(pipeline)
+    mod_versions = get_installed_module_versions(orchestrator.renderers)
+    logger.info(
+        "Installed modules: %s",
+        ", ".join(f"{k}={v}" for k, v in mod_versions.items()),
+    )
     volume_controller = VolumeController(
         camilla=camilla,
         on_volume_changed=orchestrator.push_volume_to_active_client,
