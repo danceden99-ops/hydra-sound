@@ -54,7 +54,7 @@ def _find_ir_event_devices(mode: str) -> List[Path]:
             continue
         if mode == "flirc" and "flirc" in name:
             devices.append(dev_node)
-        elif mode == "gpio" and ("gpio" in name or "ir" in name):
+        elif mode == "gpio" and ("gpio" in name or "lirc" in name or re.search(r"\bir\b", name)):
             devices.append(dev_node)
     return devices
 

@@ -140,11 +140,14 @@ def build_camilladsp_config(
             samplerate_val = audio_cfg.resample_rate
         else:
             samplerate_val = "$samplerate$"
-        rate_num = samplerate_val if isinstance(samplerate_val, int) else 96000
-        chunksize = 1024 if rate_num <= 48000 else (4096 if rate_num > 96000 else 2048)
+        chunksize_val: int | str = (
+            (1024 if samplerate_val <= 48000 else (4096 if samplerate_val > 96000 else 2048))
+            if isinstance(samplerate_val, int)
+            else "$chunksize$"
+        )
         devices: dict = {
             "samplerate": samplerate_val,
-            "chunksize": chunksize,
+            "chunksize": chunksize_val,
             "enable_rate_adjust": False,
             "capture": {
                 "type": "Stdin",
@@ -159,13 +162,7 @@ def build_camilladsp_config(
             },
         }
         if audio_cfg.resample_enabled or fir_rate is not None:
-            profile = RESAMPLER_PROFILES.get(
-                audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
-            )
-            devices["resampler"] = {
-                "type": "AsyncSinc",
-                "profile": profile["profile"],
-            }
+            devices["resampler"] = {"type": "Synchronous"}
             devices["capture_samplerate"] = "$samplerate$"
     else:
         chunksize = (
@@ -358,7 +355,7 @@ class CamillaDSPManager:
             audio_cfg, volume_cfg, use_alsa_cdsp=True, eq_cfg=eq_cfg
         )
         dumped = yaml.safe_dump(data, sort_keys=False)
-        for tok in ("$samplerate$", "$channels$", "$format$"):
+        for tok in ("$samplerate$", "$channels$", "$format$", "$chunksize$"):
             dumped = dumped.replace(f"'{tok}'", tok).replace(f'"{tok}"', tok)
         return dumped
 
@@ -495,15 +492,18 @@ class CamillaDSPManager:
         if self._cdsp_mode:
             self.write_statefile(db, muted)
             uri = f"ws://127.0.0.1:{CAMILLA_WS_PORT}"
-            try:
-                async with websockets.connect(uri, open_timeout=0.5) as ws:
-                    await ws.send(json.dumps({"SetFaderVolume": [1, db]}))
-                    await ws.recv()
-                    await ws.send(json.dumps({"SetFaderMute": [1, muted]}))
-                    await ws.recv()
-            except Exception:
-                # Idle between streams (alsa_cdsp spawns camilladsp on demand)
-                pass
+            for attempt in range(3):
+                try:
+                    async with websockets.connect(uri, open_timeout=0.35) as ws:
+                        await ws.send(json.dumps({"SetFaderVolume": [1, db]}))
+                        await ws.recv()
+                        await ws.send(json.dumps({"SetFaderMute": [1, muted]}))
+                        await ws.recv()
+                    return
+                except Exception:
+                    if attempt < 2:
+                        await asyncio.sleep(0.12)
+            # Idle between streams (alsa_cdsp spawns camilladsp on demand)
             return
 
         if not self.running:
@@ -535,11 +535,11 @@ class CamillaDSPManager:
             return
         uri = f"ws://127.0.0.1:{CAMILLA_WS_PORT}"
         last_exc: Optional[Exception] = None
-        for attempt in range(25):
+        for attempt in range(12):
             if not self.running or (self._proc and self._proc.poll() is not None):
                 return
             try:
-                async with websockets.connect(uri, open_timeout=1.5) as ws:
+                async with websockets.connect(uri, open_timeout=0.5) as ws:
                     await ws.send(json.dumps({"SetFaderVolume": [1, db]}))
                     await ws.recv()
                     await ws.send(json.dumps({"SetFaderMute": [1, muted]}))
@@ -547,6 +547,6 @@ class CamillaDSPManager:
                 return
             except Exception as exc:
                 last_exc = exc
-                if attempt < 24:
+                if attempt < 11:
                     await asyncio.sleep(0.1)
         logger.warning("CamillaDSP WebSocket volume update failed after retries: %s", last_exc)

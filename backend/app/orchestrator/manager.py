@@ -168,6 +168,12 @@ class StreamOrchestrator:
                 self.push_volume_to_active_client(
                     cfg.volume.current_volume, cfg.volume.muted
                 )
+            if (
+                event in ("play", "playing", "start")
+                and has_alsa_cdsp()
+                and self._on_pipeline_restarted
+            ):
+                await self._on_pipeline_restarted(cfg)
             if artist:
                 self.stream.artist = artist
             if title:

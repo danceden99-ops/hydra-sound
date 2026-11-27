@@ -383,8 +383,6 @@ $("save-volume").addEventListener("click", async () => {
     power_on_volume: Number($("vol-power-on").value),
     max_volume: Number($("vol-max").value),
     step_size: Number($("vol-step").value),
-    current_volume: Number($("vol-slider").value),
-    muted: currentMuted,
     hardware_mixer_name: $("vol-hw-mixer").value || "PCM",
     usb_disabled_confirmed: confirmed,
   });

@@ -23,13 +23,21 @@ fi
 TMPL="${CFG_DIR}/camilladsp_in.yml"
 OUT="${CFG_DIR}/camilladsp.yml"
 
+CHUNKSIZE=2048
+if [[ "$RATE" -le 48000 ]]; then
+  CHUNKSIZE=1024
+elif [[ "$RATE" -gt 96000 ]]; then
+  CHUNKSIZE=4096
+fi
+
 sed \
   -e "s/\\\$format\\\$/${FMT}/g" \
   -e "s/\\\$samplerate\\\$/${RATE}/g" \
   -e "s/\\\$channels\\\$/${CHANNELS}/g" \
+  -e "s/\\\$chunksize\\\$/${CHUNKSIZE}/g" \
   "$TMPL" > "$OUT"
 
-# Bypass AsyncSinc resampler when capture rate already matches target samplerate
+# Bypass Synchronous resampler when capture rate already matches target samplerate
 if grep -qE "^  samplerate: ${RATE}$" "$OUT" && grep -qE "^  capture_samplerate: ${RATE}$" "$OUT"; then
-  sed -i -e '/^  resampler:/,/^    profile:/d' -e '/^  capture_samplerate:/d' "$OUT"
+  sed -i -e '/^  resampler:/{N;d;}' -e '/^  capture_samplerate:/d' "$OUT"
 fi

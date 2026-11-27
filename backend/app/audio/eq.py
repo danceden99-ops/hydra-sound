@@ -440,14 +440,14 @@ def _parse_wav_bytes(raw: bytes, channel_idx: int = 0) -> Tuple["np.ndarray", in
     return arr, int(sample_rate)
 
 
-def _write_float64_wav(path: Path, taps: "np.ndarray", sample_rate: int) -> None:
-    """Write mono 64-bit IEEE float WAV impulse file for CamillaDSP Conv."""
+def _write_float32_wav(path: Path, taps: "np.ndarray", sample_rate: int) -> None:
+    """Write mono 32-bit IEEE float WAV impulse file for CamillaDSP Conv."""
     import numpy as np
     path.parent.mkdir(parents=True, exist_ok=True)
-    f64 = np.asarray(taps, dtype="<f8")
-    pcm_bytes = f64.tobytes()
+    f32 = np.asarray(taps, dtype="<f4")
+    pcm_bytes = f32.tobytes()
     data_size = len(pcm_bytes)
-    byte_rate = sample_rate * 8
+    byte_rate = sample_rate * 4
     header = struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF",
@@ -459,8 +459,8 @@ def _write_float64_wav(path: Path, taps: "np.ndarray", sample_rate: int) -> None
         1,  # mono
         sample_rate,
         byte_rate,
-        8,  # block align
-        64,
+        4,  # block align
+        32,
         b"data",
         data_size,
     )
@@ -476,7 +476,7 @@ def import_rephase_impulse(
     channel_idx: int = 0,
     impulses_dir: Optional[Path] = None,
 ) -> Tuple[Path, int, int, float]:
-    """Validate and save a rePhase FIR impulse (.wav/.txt/.bin) as mono 64-bit float WAV.
+    """Validate and save a rePhase FIR impulse (.wav/.txt/.bin) as mono 32-bit float WAV.
 
     Returns (saved_path, sample_rate, tap_count, peak_gain_db).
     """
@@ -525,5 +525,5 @@ def import_rephase_impulse(
     out_dir = impulses_dir or default_impulses_dir()
     safe_side = "left" if side == "left" else "right"
     out_path = out_dir / f"{preset_id}_{safe_side}.wav"
-    _write_float64_wav(out_path, taps, sr)
+    _write_float32_wav(out_path, taps, sr)
     return out_path, sr, int(len(taps)), peak_gain_db

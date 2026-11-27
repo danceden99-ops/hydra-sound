@@ -90,6 +90,12 @@ async def lifespan(app: FastAPI):
     app.state.network_manager = network_manager
     app.state.hotplug_monitor = hotplug_monitor
 
+    if cfg.volume.mode != "disabled":
+        cfg.volume.power_on_volume = volume_controller.clamp_volume(
+            cfg.volume.power_on_volume, cfg.volume
+        )
+        cfg.volume.current_volume = cfg.volume.power_on_volume
+        cfg.volume.muted = False
     if cfg.volume.mode == "hardware":
         await volume_controller.apply_power_on(cfg.audio, cfg.volume)
         if volume_controller.hardware_error:

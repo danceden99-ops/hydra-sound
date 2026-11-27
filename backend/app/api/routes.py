@@ -248,12 +248,11 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         mode_changed = cfg.volume.mode != payload.mode
         max_changed = cfg.volume.max_volume != payload.max_volume
         curve_changed = cfg.volume.curve != payload.curve
-        if payload.mode != "disabled":
-            payload.usb_disabled_confirmed = False
-        for field_name in payload.model_fields:
-            if field_name in ("current_volume", "muted") and field_name not in payload.model_fields_set:
-                continue
-            setattr(cfg.volume, field_name, getattr(payload, field_name))
+        if "mode" in payload.model_fields_set and payload.mode != "disabled":
+            cfg.volume.usb_disabled_confirmed = False
+        for field_name in payload.model_fields_set:
+            if field_name in payload.model_fields:
+                setattr(cfg.volume, field_name, getattr(payload, field_name))
         cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
             cfg.volume.power_on_volume, cfg.volume
         )
@@ -356,6 +355,7 @@ async def update_renderers_config(payload: RenderersConfig, request: Request) ->
     cfg.renderers = payload
     state.config_store.save(cfg)
     state.orchestrator.start_enabled_renderers(cfg)
+    await state.volume_controller.apply(cfg.audio, cfg.volume, notify_client=False)
     return {"ok": True}
 
 

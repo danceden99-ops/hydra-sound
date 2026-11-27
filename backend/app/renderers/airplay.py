@@ -107,7 +107,7 @@ class AirPlayRenderer(RendererAdapter):
 
 alsa = {{
   output_device = "{target_device}";
-  output_rate = "auto";
+  output_rate = 44100;
   output_format = "auto";
 }};
 
