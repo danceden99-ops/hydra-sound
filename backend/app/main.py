@@ -14,7 +14,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.audio.alsa import get_usb_device_identity
-from app.audio.camilladsp import CamillaDSPManager
+from app.audio.camilladsp import (
+    CamillaDSPManager,
+    get_effective_max_volume,
+    get_hard_max_volume,
+)
 from app.audio.hotplug import USBHotplugMonitor, reconcile_audio_device_identity
 from app.audio.pipeline import AudioPipelineManager
 from app.config import ConfigStore
@@ -247,6 +251,8 @@ async def ws_status(websocket: WebSocket) -> None:
                 {
                     "stream": asdict(state.orchestrator.stream),
                     "volume": cfg.volume.model_dump(),
+                    "effective_max_volume": get_effective_max_volume(cfg.volume),
+                    "hard_max_volume": get_hard_max_volume(),
                     "audio": cfg.audio.model_dump(),
                     "system": get_system_metrics(),
                     "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq),

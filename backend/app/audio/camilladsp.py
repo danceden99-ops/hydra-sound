@@ -86,15 +86,23 @@ def percent_to_db(percent: int, curve: str = "logarithmic", min_db: float = -80.
     return round(max(min_db, db), 2)
 
 
+def get_hard_max_volume() -> Optional[int]:
+    """Return optional OS-level HYDRA_HARD_MAX_VOLUME (0..100), or None if unset."""
+    hard_cap_env = os.environ.get("HYDRA_HARD_MAX_VOLUME")
+    if hard_cap_env is None:
+        return None
+    try:
+        return max(0, min(100, int(hard_cap_env)))
+    except ValueError:
+        return None
+
+
 def get_effective_max_volume(vol_cfg: VolumeConfig) -> int:
     """Return effective max_volume (0..100) respecting HYDRA_HARD_MAX_VOLUME."""
     max_allowed = max(0, min(100, int(vol_cfg.max_volume)))
-    hard_cap_env = os.environ.get("HYDRA_HARD_MAX_VOLUME")
-    if hard_cap_env is not None:
-        try:
-            max_allowed = min(max_allowed, max(0, min(100, int(hard_cap_env))))
-        except ValueError:
-            pass
+    hard_cap = get_hard_max_volume()
+    if hard_cap is not None:
+        max_allowed = min(max_allowed, hard_cap)
     return max_allowed
 
 

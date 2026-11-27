@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
+from app.audio.camilladsp import get_effective_max_volume, get_hard_max_volume
+
 from app.audio.alsa import (
     format_named_alsa_device,
     get_device_capabilities,
@@ -96,6 +98,8 @@ async def get_status(request: Request) -> dict:
     return {
         "stream": asdict(state.orchestrator.stream),
         "volume": cfg.volume.model_dump(),
+        "effective_max_volume": get_effective_max_volume(cfg.volume),
+        "hard_max_volume": get_hard_max_volume(),
         "audio": cfg.audio.model_dump(),
         "system": get_system_metrics(),
         "network": state.network_manager.get_status(cfg.network),

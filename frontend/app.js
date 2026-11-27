@@ -94,8 +94,13 @@ function updateLiveUI(data) {
   const disabled = volume.mode === "disabled";
   $("vol-slider").disabled = disabled;
   $("btn-mute").disabled = disabled;
-  $("vol-slider").max = volume.max_volume;
+  const effMax = data.effective_max_volume ?? volume.max_volume;
+  $("vol-slider").max = effMax;
   $("vol-slider").value = volume.current_volume;
+  $("vol-slider").title =
+    data.hard_max_volume != null
+      ? `OS hard limit active: ${data.hard_max_volume}% (effective max: ${effMax}%)`
+      : "";
   currentMuted = Boolean(volume.muted);
   $("vol-value").textContent = volume.muted ? "MUTED" : `${volume.current_volume}%`;
 
