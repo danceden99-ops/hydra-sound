@@ -331,12 +331,18 @@ def install_github_release(repo: str, tag: str) -> Dict[str, object]:
         pip_bin = Path("/opt/hydrasound/venv/bin/pip")
         req_file = repo_root / "backend" / "requirements.txt"
         if pip_bin.exists() and req_file.exists():
-            subprocess.run(
+            pip_res = subprocess.run(
                 [str(pip_bin), "install", "-r", str(req_file)],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=300,
             )
+            if pip_res.returncode != 0:
+                logger.warning(
+                    "pip install requirements exited %s: %s",
+                    pip_res.returncode,
+                    (pip_res.stderr or pip_res.stdout).strip()[-400:],
+                )
 
         # Also update prebuilt ARM64 streaming binaries if attached to this release tag
         if clean_tag != "main" and platform.machine() == "aarch64":

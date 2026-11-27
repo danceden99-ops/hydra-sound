@@ -887,9 +887,7 @@ async def import_eq_impulse(payload: EQImpulseImportRequest, request: Request) -
 
 @router.post("/eq/preview")
 async def preview_eq_response(payload: EQPreviewRequest) -> dict:
-    import numpy as np
-
-    grid = np.geomspace(20.0, 20000.0, 160)
+    grid = [20.0 * (1000.0 ** (i / 159.0)) for i in range(160)]
     left = evaluate_bands_db(payload.bands, "left", grid)
     right = evaluate_bands_db(payload.bands, "right", grid)
     tgt = target_curve_db(grid, payload.target_curve)

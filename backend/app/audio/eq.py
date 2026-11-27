@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import cmath
 import math
 import os
 import re
 import struct
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple
 
-import numpy as np
 import yaml
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from app.config import EQBand
 
@@ -114,10 +117,9 @@ def parse_rew_camilladsp_yaml(text: str, channel: str = "both") -> List[EQBand]:
     return bands
 
 
-def parse_rew_measurement(text: str) -> Tuple[np.ndarray, np.ndarray]:
+def parse_rew_measurement(text: str) -> Tuple[List[float], List[float]]:
     """Parse REW measurement .txt/.frd (Freq SPL [Phase]) skipping * / # comments."""
-    freqs: List[float] = []
-    spls: List[float] = []
+    pairs: dict[float, float] = {}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("*") or line.startswith("#"):
@@ -130,46 +132,51 @@ def parse_rew_measurement(text: str) -> Tuple[np.ndarray, np.ndarray]:
             s = _to_float(parts[1])
         except ValueError:
             continue
-        if 10.0 <= f <= 24000.0 and math.isfinite(s):
-            freqs.append(f)
-            spls.append(s)
-    if len(freqs) < 8:
+        if 10.0 <= f <= 24000.0 and math.isfinite(s) and f not in pairs:
+            pairs[f] = s
+    if len(pairs) < 8:
         raise ValueError("Measurement file must contain at least 8 valid Frequency/SPL rows.")
-    arr_f = np.asarray(freqs, dtype=np.float64)
-    arr_s = np.asarray(spls, dtype=np.float64)
-    order = np.argsort(arr_f)
-    arr_f = arr_f[order]
-    arr_s = arr_s[order]
-    uniq_f, uniq_idx = np.unique(arr_f, return_index=True)
-    return uniq_f, arr_s[uniq_idx]
+    sorted_freqs = sorted(pairs.keys())
+    return sorted_freqs, [pairs[f] for f in sorted_freqs]
 
 
 def downsample_curve_for_preview(
-    freqs: np.ndarray, spl: np.ndarray, n_points: int = 160
+    freqs: Iterable[float], spl: Iterable[float], n_points: int = 160
 ) -> Tuple[List[float], List[float]]:
     """Interpolate a measurement curve onto compact log-spaced points for JSON storage."""
-    f_min = max(20.0, float(freqs[0]))
-    f_max = min(20000.0, float(freqs[-1]))
+    import numpy as np
+
+    f_arr = np.asarray(list(freqs), dtype=np.float64)
+    s_arr = np.asarray(list(spl), dtype=np.float64)
+    f_min = max(20.0, float(f_arr[0]))
+    f_max = min(20000.0, float(f_arr[-1]))
     if f_max <= f_min:
         f_min, f_max = 20.0, 20000.0
     grid = np.geomspace(f_min, f_max, n_points)
-    interp = np.interp(np.log10(grid), np.log10(freqs), spl)
+    interp = np.interp(np.log10(grid), np.log10(f_arr), s_arr)
     return [round(float(x), 2) for x in grid], [round(float(y), 2) for y in interp]
 
 
-def target_curve_db(freqs_hz: np.ndarray, target: str = "harman") -> np.ndarray:
+def target_curve_db(freqs_hz: Iterable[float], target: str = "harman") -> List[float]:
     """Return relative target response (dB) at freqs_hz."""
+    freqs_list = list(freqs_hz)
     if target == "flat":
-        return np.zeros_like(freqs_hz, dtype=np.float64)
-    # Harman in-room preference curve: ~+4.5 dB bass shelf below 120 Hz, -1.5 dB HF tilt
-    log_f = np.log10(np.clip(freqs_hz, 20.0, 20000.0))
-    bass = 4.5 / (1.0 + np.exp((log_f - math.log10(110.0)) / 0.14))
-    treble_tilt = -1.5 * np.clip((log_f - math.log10(1000.0)) / (math.log10(20000.0) - math.log10(1000.0)), 0.0, 1.0)
-    return bass + treble_tilt
+        return [0.0 for _ in freqs_list]
+    out: List[float] = []
+    denom = math.log10(20000.0) - math.log10(1000.0)
+    for f in freqs_list:
+        fc = max(20.0, min(20000.0, float(f)))
+        log_f = math.log10(fc)
+        bass = 4.5 / (1.0 + math.exp((log_f - math.log10(110.0)) / 0.14))
+        t_pos = max(0.0, min(1.0, (log_f - math.log10(1000.0)) / denom))
+        out.append(bass - 1.5 * t_pos)
+    return out
 
 
-def _variable_octave_smooth(freqs: np.ndarray, spl: np.ndarray) -> np.ndarray:
+def _variable_octave_smooth(freqs: "np.ndarray", spl: "np.ndarray") -> "np.ndarray":
     """Apply 1/12-oct (<250 Hz), 1/6-oct (250-2k Hz), and 1/3-oct (>2k Hz) smoothing."""
+    import numpy as np
+
     log2_f = np.log2(freqs)
     out = np.empty_like(spl)
     for i, f in enumerate(freqs):
@@ -185,9 +192,10 @@ def _variable_octave_smooth(freqs: np.ndarray, spl: np.ndarray) -> np.ndarray:
 
 
 def biquad_magnitude_db(
-    btype: str, freq: float, gain_db: float, q: float, freqs_hz: np.ndarray, fs: float = 48000.0
-) -> np.ndarray:
+    btype: str, freq: float, gain_db: float, q: float, freqs_hz: Iterable[float], fs: float = 48000.0
+) -> List[float]:
     """Compute Audio-EQ-Cookbook biquad magnitude response in dB."""
+    freqs_list = list(freqs_hz)
     f0 = min(freq, fs * 0.49)
     w0 = 2.0 * math.pi * f0 / fs
     cos_w0 = math.cos(w0)
@@ -233,28 +241,35 @@ def biquad_magnitude_db(
         a1 = -2.0 * cos_w0
         a2 = 1.0 - alpha
     else:
-        return np.zeros_like(freqs_hz, dtype=np.float64)
+        return [0.0 for _ in freqs_list]
 
-    w = 2.0 * np.pi * np.clip(freqs_hz, 1.0, fs * 0.495) / fs
-    z_inv = np.exp(-1j * w)
-    z_inv2 = z_inv * z_inv
-    num = b0 + b1 * z_inv + b2 * z_inv2
-    den = a0 + a1 * z_inv + a2 * z_inv2
-    mag = np.maximum(np.abs(num / den), 1e-9)
-    return 20.0 * np.log10(mag)
+    out: List[float] = []
+    f_cap = fs * 0.495
+    for f in freqs_list:
+        w = 2.0 * math.pi * max(1.0, min(f_cap, float(f))) / fs
+        z_inv = cmath.rect(1.0, -w)
+        z_inv2 = z_inv * z_inv
+        num = b0 + b1 * z_inv + b2 * z_inv2
+        den = a0 + a1 * z_inv + a2 * z_inv2
+        mag = max(abs(num / den), 1e-9)
+        out.append(20.0 * math.log10(mag))
+    return out
 
 
 def evaluate_bands_db(
-    bands: Iterable[EQBand], channel: str, freqs_hz: np.ndarray, fs: float = 48000.0
-) -> np.ndarray:
+    bands: Iterable[EQBand], channel: str, freqs_hz: Iterable[float], fs: float = 48000.0
+) -> List[float]:
     """Sum enabled biquad magnitude responses (dB) for a given channel."""
-    total = np.zeros_like(freqs_hz, dtype=np.float64)
+    freqs_list = list(freqs_hz)
+    total = [0.0] * len(freqs_list)
     for b in bands:
         if not b.enabled:
             continue
         if b.channel not in ("both", channel):
             continue
-        total += biquad_magnitude_db(b.type, b.freq, b.gain, b.q, freqs_hz, fs=fs)
+        resp = biquad_magnitude_db(b.type, b.freq, b.gain, b.q, freqs_list, fs=fs)
+        for i, val in enumerate(resp):
+            total[i] += val
     return total
 
 
@@ -262,24 +277,33 @@ def compute_max_boost_db(
     bands: Iterable[EQBand], channel: str, impulse_peak_db: float = 0.0
 ) -> float:
     """Return worst-case positive boost (dB) across 20 Hz - 20 kHz for headroom pre-gain."""
-    grid = np.geomspace(20.0, 20000.0, 256)
+    grid = [20.0 * (1000.0 ** (i / 199.0)) for i in range(200)]
     total_db = evaluate_bands_db(bands, channel, grid)
-    biquad_peak = max(0.0, float(np.max(total_db)))
+    biquad_peak = max([0.0] + total_db)
     return round(biquad_peak + max(0.0, float(impulse_peak_db)), 2)
 
 
 def auto_eq_from_measurement(
-    freqs: np.ndarray,
-    spl: np.ndarray,
+    freqs: Iterable[float],
+    spl: Iterable[float],
     target_curve: str = "harman",
     channel: str = "both",
     max_bands: int = 10,
 ) -> Tuple[List[EQBand], List[float], List[float]]:
     """Generate cut-biased, null-safe Peaking Biquad filters from a REW measurement."""
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise ValueError(
+            "numpy is required for Auto-EQ calculation. Run: /opt/hydrasound/venv/bin/pip install numpy"
+        ) from exc
+
+    f_arr = np.asarray(list(freqs), dtype=np.float64)
+    s_arr = np.asarray(list(spl), dtype=np.float64)
     grid = np.geomspace(20.0, 20000.0, 220)
-    raw_interp = np.interp(np.log10(grid), np.log10(freqs), spl)
+    raw_interp = np.interp(np.log10(grid), np.log10(f_arr), s_arr)
     smoothed = _variable_octave_smooth(grid, raw_interp)
-    target = target_curve_db(grid, target_curve)
+    target = np.asarray(target_curve_db(grid, target_curve), dtype=np.float64)
 
     # Align target to midrange (300 Hz - 2 kHz)
     mid_mask = (grid >= 300.0) & (grid <= 2000.0)
@@ -322,7 +346,7 @@ def auto_eq_from_measurement(
         best_resp: Optional[np.ndarray] = None
 
         for q in q_choices:
-            resp = biquad_magnitude_db("Peaking", fc, target_gain, q, grid)
+            resp = np.asarray(biquad_magnitude_db("Peaking", fc, target_gain, q, grid), dtype=np.float64)
             cand_err = current_err + resp
             score = float(np.sum((cand_err ** 2) * weights))
             if score < best_score:
@@ -347,8 +371,9 @@ def auto_eq_from_measurement(
     return bands, preview_f, preview_s
 
 
-def _parse_wav_bytes(raw: bytes, channel_idx: int = 0) -> Tuple[np.ndarray, int]:
+def _parse_wav_bytes(raw: bytes, channel_idx: int = 0) -> Tuple["np.ndarray", int]:
     """Decode PCM (16/24/32-bit) or IEEE float (32/64-bit) WAV bytes into float64 taps."""
+    import numpy as np
     if len(raw) < 44 or raw[:4] != b"RIFF" or raw[8:12] != b"WAVE":
         raise ValueError("Invalid WAV header.")
 
@@ -411,8 +436,9 @@ def _parse_wav_bytes(raw: bytes, channel_idx: int = 0) -> Tuple[np.ndarray, int]
     return arr, int(sample_rate)
 
 
-def _write_float32_wav(path: Path, taps: np.ndarray, sample_rate: int) -> None:
+def _write_float32_wav(path: Path, taps: "np.ndarray", sample_rate: int) -> None:
     """Write mono 32-bit IEEE float WAV impulse file for CamillaDSP Conv."""
+    import numpy as np
     path.parent.mkdir(parents=True, exist_ok=True)
     f32 = np.asarray(taps, dtype="<f4")
     pcm_bytes = f32.tobytes()
@@ -450,6 +476,13 @@ def import_rephase_impulse(
 
     Returns (saved_path, sample_rate, tap_count, peak_gain_db).
     """
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise ValueError(
+            "numpy is required for FIR impulse import. Run: /opt/hydrasound/venv/bin/pip install numpy"
+        ) from exc
+
     ext = Path(filename).suffix.lower()
     if ext == ".wav":
         taps, detected_rate = _parse_wav_bytes(raw, channel_idx=channel_idx)
