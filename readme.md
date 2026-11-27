@@ -33,7 +33,13 @@ Hydra Sound turns a Raspberry Pi 4 or 5 into a discoverable, high-resolution LAN
   - **Disabled:** 0 dB pass-through for downstream preamps/DACs/AVRs (with USB DAC speaker-protection mute until confirmed).
   - **Hardware:** Controls the ALSA hardware mixer (`amixer -M`) on USB DACs/HATs (e.g. XMOS UAC2), with live warning banner if no usable mixer exists.
   - **Software (32-bit+):** Real-time CamillaDSP WebSocket `Aux1` fader gain (`SetFaderVolume` / `SetFaderMute`).
-  - Configurable **Logarithmic** or **Linear** curve, **Power-On Volume**, **Max Volume Limit**, and **Step Size**, with bidirectional volume sync to `go-librespot`.
+  - Configurable **Logarithmic** or **Linear** curve, **Power-On Volume**, **Max Volume Limit**, and **Step Size**, with bidirectional volume sync to `go-librespot` (Spotify Connect) and `pibuz` (Qobuz Connect `external`/`locked` modes).
+- **Room & Speaker EQ (v2.0 — Off by Default):**
+  - **Bit-Perfect Default:** Room EQ is **Off** on fresh installs and never engages CamillaDSP unless explicitly enabled in the Web GUI.
+  - **Hybrid Web GUI:** Compact `Room EQ: [ Off (Bit-Perfect) ▾ ]` A/B switcher on the main dashboard plus a dedicated **Room EQ** tab with preset management, per-channel (`Both` / `Left` / `Right`) parametric Biquad editor (`Peaking`, `LowShelf`, `HighShelf`, `Lowpass`, `Highpass`), per-channel delay (`ms`), and a live `20 Hz – 20 kHz` frequency-response preview chart.
+  - **REW Filter & Measurement Import + Auto-EQ:** Import REW CamillaDSP YAML or Filter `.txt` exports directly, or import REW `.txt`/`.frd` measurements to generate cut-biased, null-safe Biquad filters against **Harman In-Room** or **Flat** targets using variable octave smoothing (`1/12`, `1/6`, `1/3`).
+  - **rePhase FIR Convolution:** Import mono/stereo `.wav`, `.txt`, or `.bin` FIR impulses (up to 65,536 taps) for speaker phase/amplitude linearization, with automatic `AsyncSinc` sample-rate alignment when stream rates differ.
+  - **Fail-Closed Headroom Protection:** Automatically prepends negative headroom `Gain` (`-(max_boost + 0.1) dB`), `-0.1 dB` `Limiter`, and `Flat` TPDF `Dither` ahead of/after EQ in CamillaDSP's 64-bit float pipeline.
 - **IR Remote Control:**
   - **FLIRC USB** with `flirc_util` status/learning in the Web GUI (Volume+, Volume-, Mute, Clear) and a built-in `/dev/input/event*` HID key listener (150ms debounce) wired directly to `VolumeController`.
   - **GPIO IR Receiver** with Web GUI-selectable BCM GPIO pin (`dtoverlay=gpio-ir`) and `/dev/input/event*` listener.
@@ -42,7 +48,7 @@ Hydra Sound turns a Raspberry Pi 4 or 5 into a discoverable, high-resolution LAN
   - Zero-config mDNS access at `http://hydrasound.local:8000` with live interface/IP summary, **DHCP / Static IP**, and **Wi-Fi** scan/country/connect (`nmcli`).
 - **System Updater, Power Control & SD-Safe Logging:**
   - **Web GUI Release & Branch Updater:** Check GitHub Releases (or `main`) and install updates + restart `hydrasound.service` directly from the **System** tab without SSH, plus per-module upstream updates in the **Renderers** tab.
-  - **SD-Safe File Logging:** Bounded 500-entry rolling log (`hydrasound.log`) with View, Download, and Clear controls — **Off by default** to prevent SD card wear, toggleable live in the **System** tab.
+  - **SD-Safe File Logging:** Bounded 2,000-entry rolling log (`hydrasound.log`) using batched appends and periodic compaction, with View, Download, and Clear controls — **Off by default** to prevent SD card wear, toggleable live in the **System** tab.
   - Safe **Reboot** and **Shutdown** buttons for headless operation.
 
 ---
