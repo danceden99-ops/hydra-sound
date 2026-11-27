@@ -530,6 +530,8 @@ $("save-ir").addEventListener("click", async () => {
 document.querySelectorAll("[data-learn]").forEach((btn) => {
   btn.addEventListener("click", async () => {
     const mode = $("ir-mode").value;
+    const learnBtns = document.querySelectorAll("[data-learn], #flirc-clear");
+    learnBtns.forEach((b) => { b.disabled = true; });
     $("flirc-learn-msg").textContent = `Point remote at ${mode === "gpio" ? "GPIO IR receiver" : "FLIRC"} and press button for ${btn.dataset.learn}…`;
     const pollId = setInterval(async () => {
       try { updateIrStatusText(await api("/api/ir/status")); } catch {}
@@ -541,6 +543,7 @@ document.querySelectorAll("[data-learn]").forEach((btn) => {
         : (res.error || res.output);
     } finally {
       clearInterval(pollId);
+      learnBtns.forEach((b) => { b.disabled = false; });
       try { updateIrStatusText(await api("/api/ir/status")); } catch {}
     }
   });

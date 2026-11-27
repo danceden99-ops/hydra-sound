@@ -40,6 +40,30 @@ _INPUT_EVENT_FMT = "llHHi"
 _INPUT_EVENT_SIZE = struct.calcsize(_INPUT_EVENT_FMT)
 
 
+def _enable_gpio_ir_protocols() -> List[str]:
+    """Enable all hardware IR decoders (NEC, RC-5, RC-6, Sony, JVC, etc.) on /sys/class/rc/rc*."""
+    enabled: List[str] = []
+    rc_root = Path("/sys/class/rc")
+    if not rc_root.exists():
+        return enabled
+    for proto_file in sorted(rc_root.glob("rc*/protocols")):
+        try:
+            text = proto_file.read_text(encoding="utf-8", errors="ignore")
+            for tok in text.split():
+                clean = tok.strip("[]")
+                if clean and clean != "lirc" and not tok.startswith("["):
+                    try:
+                        proto_file.write_text(f"+{clean}\n", encoding="utf-8")
+                    except OSError:
+                        pass
+            # Read back active protocols
+            after = proto_file.read_text(encoding="utf-8", errors="ignore")
+            enabled.extend(t.strip("[]") for t in after.split() if t.startswith("["))
+        except OSError:
+            pass
+    return enabled
+
+
 def _find_ir_event_devices(mode: str) -> List[Path]:
     """Find `/dev/input/event*` nodes matching FLIRC or GPIO IR."""
     devices: List[Path] = []
@@ -138,11 +162,16 @@ class IRManager:
             if mode != active_mode or not fds:
                 _close_all()
                 active_mode = mode
+                if mode == "gpio":
+                    protos = _enable_gpio_ir_protocols()
+                    if protos:
+                        self._record_activity(f"GPIO IR protocols active: {', '.join(protos)}")
                 for dev_path in _find_ir_event_devices(mode):
                     try:
                         fd = os.open(str(dev_path), os.O_RDONLY | os.O_NONBLOCK)
                         fds[fd] = dev_path
                         logger.info("Listening for IR key events on %s (%s)", dev_path, mode)
+                        self._record_activity(f"Listening on {dev_path} ({mode})")
                     except OSError as exc:
                         logger.debug("Could not open IR input %s: %s", dev_path, exc)
                 if not fds:
@@ -227,6 +256,9 @@ class IRManager:
         """Capture 2 matching MSC_SCAN frames from GPIO IR, check duplicates, and drain repeats."""
         if action not in FLIRC_ACTION_TO_KEY:
             return {"ok": False, "error": f"Unsupported IR action: {action}"}
+        if self._learning_action is not None:
+            return {"ok": False, "error": f"Already learning '{self._learning_action}'; please wait."}
+        protos = _enable_gpio_ir_protocols()
         devices = _find_ir_event_devices("gpio")
         if not devices:
             msg = "No GPIO IR receiver found (/dev/input/event*). Save GPIO mode and reboot first."
@@ -234,7 +266,7 @@ class IRManager:
             return {"ok": False, "action": action, "error": msg}
         self._learning_action = action
         self._record_activity(
-            f"Learning '{action}' (GPIO) — press button (waiting for 2 matching frames)…"
+            f"Learning '{action}' (GPIO, protocols: {', '.join(protos) or 'default'}) — press button twice (or hold briefly)…"
         )
         fds: Dict[int, Path] = {}
         try:
@@ -280,7 +312,7 @@ class IRManager:
                             continue
                         scancode = int(value)
                         now = time.monotonic()
-                        if first_code == scancode and (now - first_ts) <= 1.2:
+                        if first_code == scancode and (now - first_ts) <= 2.5:
                             dup_action = next(
                                 (
                                     k
