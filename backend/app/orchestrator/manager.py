@@ -67,7 +67,9 @@ class StreamOrchestrator:
         self._on_pipeline_restarted = cb
 
     def start_enabled_renderers(self, cfg: HydraConfig) -> None:
-        self._current_alsa_device = self.pipeline.apply(cfg.audio, cfg.volume)
+        self._current_alsa_device = self.pipeline.apply(
+            cfg.audio, cfg.volume, eq_cfg=cfg.eq
+        )
         self._active_capture_rate = 44100
         for rid, renderer in self.renderers.items():
             if renderer.is_enabled(cfg):
@@ -170,11 +172,14 @@ class StreamOrchestrator:
                 if (
                     8000 <= incoming_rate <= 768000
                     and incoming_rate != self._active_capture_rate
-                    and self.pipeline.requires_dsp(cfg.audio, cfg.volume)
+                    and self.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
                 ):
                     self._active_capture_rate = incoming_rate
                     self.pipeline.apply(
-                        cfg.audio, cfg.volume, capture_rate=incoming_rate
+                        cfg.audio,
+                        cfg.volume,
+                        capture_rate=incoming_rate,
+                        eq_cfg=cfg.eq,
                     )
                     if self._on_pipeline_restarted:
                         await self._on_pipeline_restarted(cfg)

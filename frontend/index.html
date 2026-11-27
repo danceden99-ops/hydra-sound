@@ -49,6 +49,13 @@
         </div>
       </div>
       <div id="renderer-status-strip" class="row-actions" style="margin-top: 12px;"></div>
+      <div class="eq-quick-row">
+        <label for="eq-quick-select">Room EQ:</label>
+        <select id="eq-quick-select">
+          <option value="off">Off (Bit-Perfect)</option>
+        </select>
+        <span id="eq-quick-note" class="hint"></span>
+      </div>
     </section>
 
     <!-- Live Volume Control -->
@@ -74,6 +81,7 @@
     <!-- Tabs -->
     <nav class="tabs">
       <button class="tab active" data-tab="audio">Audio &amp; DSP</button>
+      <button class="tab" data-tab="eq">Room EQ</button>
       <button class="tab" data-tab="volume">Volume Settings</button>
       <button class="tab" data-tab="services">Services &amp; Updates</button>
       <button class="tab" data-tab="ir">IR Remote</button>
@@ -134,6 +142,151 @@
         <button class="btn btn-outline" id="btn-test-tone">Play Test Tone (440 Hz)</button>
       </div>
       <pre id="audio-caps-output" class="service-item hint" hidden style="margin-top: 12px; white-space: pre-wrap; overflow-x: auto;"></pre>
+    </section>
+
+    <!-- Room EQ Tab -->
+    <section class="card tab-panel" id="tab-eq">
+      <div class="card-header">
+        <h2>Room &amp; Speaker EQ (CamillaDSP 64-bit)</h2>
+        <label class="checkbox-row" style="margin: 0;">
+          <input type="checkbox" id="eq-enabled" />
+          <span>Enable Room/Speaker EQ (Off by default)</span>
+        </label>
+      </div>
+      <p class="hint">When disabled, audio bypasses CamillaDSP directly to ALSA hardware (assuming Resampling and Software Volume are also off). Positive boosts automatically insert negative headroom pre-gain to prevent clipping.</p>
+
+      <!-- Section 1: Active Preset & Band Editor -->
+      <div class="service-item" style="margin-top: 12px;">
+        <div class="card-header">
+          <strong>1. Active Preset &amp; Band Editor</strong>
+          <div class="row-actions">
+            <button class="btn btn-sm btn-outline" id="btn-eq-new">New</button>
+            <button class="btn btn-sm btn-outline" id="btn-eq-rename">Rename</button>
+            <button class="btn btn-sm btn-danger" id="btn-eq-delete">Delete</button>
+          </div>
+        </div>
+        <div class="form-grid" style="margin-top: 8px;">
+          <label>
+            Active Preset
+            <select id="eq-preset-select"></select>
+          </label>
+          <label>
+            Target Curve
+            <select id="eq-target-curve">
+              <option value="harman">Harman In-Room Target</option>
+              <option value="flat">Flat Reference</option>
+            </select>
+          </label>
+          <label>
+            Left Delay (ms)
+            <input type="number" id="eq-delay-left" min="0" max="100" step="0.05" value="0" />
+          </label>
+          <label>
+            Right Delay (ms)
+            <input type="number" id="eq-delay-right" min="0" max="100" step="0.05" value="0" />
+          </label>
+        </div>
+        <div id="eq-preset-meta" class="hint" style="margin-top: 8px;">No preset selected.</div>
+
+        <div class="eq-table-wrap">
+          <table class="eq-table">
+            <thead>
+              <tr>
+                <th>On</th>
+                <th>Channel</th>
+                <th>Type</th>
+                <th>Freq (Hz)</th>
+                <th>Gain (dB)</th>
+                <th>Q</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="eq-bands-body"></tbody>
+          </table>
+        </div>
+        <div class="row-actions" style="margin-top: 10px;">
+          <button class="btn btn-sm btn-outline" id="btn-eq-add-band">+ Add Band</button>
+          <button class="btn btn-primary" id="btn-eq-save-preset">Save &amp; Apply Preset</button>
+        </div>
+      </div>
+
+      <!-- Section 2: Import REW & rePhase Files -->
+      <div class="service-item" style="margin-top: 12px;">
+        <strong>2. Import REW &amp; rePhase Files</strong>
+        <div class="eq-import-grid">
+          <div class="eq-import-box">
+            <strong>Path A — REW EQ Filters (YAML / .txt)</strong>
+            <label>Preset Name <input type="text" id="eq-imp-flt-name" value="REW Filters" /></label>
+            <label>Channel
+              <select id="eq-imp-flt-ch">
+                <option value="both">Both (Stereo)</option>
+                <option value="left">Left Only</option>
+                <option value="right">Right Only</option>
+              </select>
+            </label>
+            <input type="file" id="eq-imp-flt-file" accept=".txt,.yml,.yaml" />
+            <textarea id="eq-imp-flt-text" rows="3" placeholder="Paste REW Filter text or CamillaDSP YAML…"></textarea>
+            <button class="btn btn-sm btn-outline" id="btn-eq-import-filters">Import EQ Filters</button>
+          </div>
+
+          <div class="eq-import-box">
+            <strong>Path B — REW Measurement (.txt / .frd) → Auto-EQ</strong>
+            <label>Preset Name <input type="text" id="eq-imp-meas-name" value="REW Auto-EQ" /></label>
+            <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 8px;">
+              <label>Channel
+                <select id="eq-imp-meas-ch">
+                  <option value="both">Both</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                </select>
+              </label>
+              <label>Target
+                <select id="eq-imp-meas-target">
+                  <option value="harman">Harman</option>
+                  <option value="flat">Flat</option>
+                </select>
+              </label>
+            </div>
+            <input type="file" id="eq-imp-meas-file" accept=".txt,.frd" />
+            <textarea id="eq-imp-meas-text" rows="3" placeholder="Paste REW measurement export…"></textarea>
+            <button class="btn btn-sm btn-outline" id="btn-eq-import-meas">Calculate Auto-EQ</button>
+          </div>
+
+          <div class="eq-import-box">
+            <strong>Path C — rePhase FIR Impulse (.wav / .txt / .bin)</strong>
+            <label>Preset Name <input type="text" id="eq-imp-fir-name" value="rePhase FIR" /></label>
+            <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 8px;">
+              <label>Channel
+                <select id="eq-imp-fir-side">
+                  <option value="stereo">Stereo</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                </select>
+              </label>
+              <label>Rate (.txt/.bin)
+                <select id="eq-imp-fir-rate">
+                  <option value="44100">44.1 kHz</option>
+                  <option value="48000">48 kHz</option>
+                  <option value="88200">88.2 kHz</option>
+                  <option value="96000">96 kHz</option>
+                  <option value="192000">192 kHz</option>
+                </select>
+              </label>
+            </div>
+            <input type="file" id="eq-imp-fir-file" accept=".wav,.txt,.bin" />
+            <button class="btn btn-sm btn-outline" id="btn-eq-import-fir">Import FIR Impulse</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 3: Frequency Response Preview Chart -->
+      <div class="service-item" style="margin-top: 12px;">
+        <div class="card-header">
+          <strong>3. Frequency Response Preview (20 Hz – 20 kHz)</strong>
+          <span id="eq-chart-legend" class="hint">Target · Filter Curve · Measurement · Predicted</span>
+        </div>
+        <canvas id="eq-chart" width="880" height="260" class="eq-chart"></canvas>
+      </div>
     </section>
 
     <!-- Volume Settings Tab -->

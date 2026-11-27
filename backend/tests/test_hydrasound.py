@@ -524,6 +524,105 @@ def test_bit_depth_24_resolves_s24_4_rj_le_and_format_cache_clears(monkeypatch) 
     assert "hw:1,0" not in alsa_mod._FORMAT_CACHE
 
 
+def test_room_eq_default_off_and_rew_parsers_and_dsp(tmp_path: Path) -> None:
+    from app.audio.eq import (
+        auto_eq_from_measurement,
+        import_rephase_impulse,
+        parse_rew_camilladsp_yaml,
+        parse_rew_filter_text,
+        parse_rew_measurement,
+    )
+    from app.config import EQPreset, RoomEQConfig
+
+    default_cfg = HydraConfig()
+    assert default_cfg.eq.enabled is False
+    assert default_cfg.eq.has_active_processing() is False
+
+    pipeline = AudioPipelineManager(CamillaDSPManager(config_path=tmp_path / "camilla.yml"))
+    assert pipeline.requires_dsp(
+        AudioOutputConfig(device_id="hw:1,0", resample_enabled=False),
+        VolumeConfig(mode="disabled"),
+        default_cfg.eq,
+    ) is False
+
+    rew_txt = (
+        "Filter  1: ON  PK       Fc   63.5 Hz  Gain  -6.5 dB  Q  4.20\n"
+        "Filter  2: ON  LS       Fc  100.0 Hz  Gain   3.0 dB  Q  0.71\n"
+        "Filter  3: OFF PK       Fc  500.0 Hz  Gain  -2.0 dB  Q  2.00\n"
+    )
+    bands = parse_rew_filter_text(rew_txt, channel="left")
+    assert len(bands) == 3
+    assert bands[0].type == "Peaking" and bands[0].freq == 63.5 and bands[0].gain == -6.5
+    assert bands[1].type == "LowShelf" and bands[1].channel == "left"
+    assert bands[2].enabled is False
+
+    rew_yaml = (
+        "filters:\n"
+        "  f1:\n"
+        "    type: Biquad\n"
+        "    parameters:\n"
+        "      type: Peaking\n"
+        "      freq: 120.0\n"
+        "      gain: 4.0\n"
+        "      q: 2.5\n"
+    )
+    ybands = parse_rew_camilladsp_yaml(rew_yaml)
+    assert len(ybands) == 1 and ybands[0].gain == 4.0
+
+    # Measurement + Auto-EQ cut-biased, null-safe check
+    meas_lines = ["* REW export"]
+    for f in (25, 40, 63, 80, 100, 200, 500, 1000, 2000, 5000, 10000, 16000):
+        spl = 85.0 if f == 63 else (60.0 if f == 200 else 75.0)
+        meas_lines.append(f"{f} {spl} 0.0")
+    mf, ms = parse_rew_measurement("\n".join(meas_lines))
+    auto_bands, _, _ = auto_eq_from_measurement(mf, ms, target_curve="flat")
+    assert all(b.gain <= 3.0 for b in auto_bands)
+
+    # rePhase FIR import + CamillaDSP headroom & Conv check
+    taps_txt = "\n".join(["0.0"] * 15 + ["1.0"] + ["0.0"] * 16)
+    imp_path, sr, taps, _ = import_rephase_impulse(
+        taps_txt.encode("utf-8"),
+        "speaker.txt",
+        "p1",
+        "left",
+        sample_rate=48000,
+        impulses_dir=tmp_path / "impulses",
+    )
+    assert imp_path.exists() and sr == 48000 and taps == 32
+
+    eq_cfg = RoomEQConfig(
+        enabled=True,
+        active_preset_id="p1",
+        presets=[
+            EQPreset(
+                id="p1",
+                name="Test EQ",
+                bands=ybands,
+                left_delay_ms=0.5,
+                left_impulse_path=str(imp_path),
+                impulse_sample_rate=48000,
+                impulse_taps=32,
+            )
+        ],
+    )
+    assert pipeline.requires_dsp(
+        AudioOutputConfig(device_id="hw:1,0", resample_enabled=False),
+        VolumeConfig(mode="disabled"),
+        eq_cfg,
+    ) is True
+    cdsp = build_camilladsp_config(
+        AudioOutputConfig(device_id="hw:1,0", resample_enabled=False),
+        VolumeConfig(mode="disabled", usb_disabled_confirmed=True),
+        capture_rate=44100,
+        eq_cfg=eq_cfg,
+    )
+    assert "eq_headroom" in cdsp["filters"]
+    assert cdsp["filters"]["eq_headroom"]["parameters"]["gain"] < 0
+    assert "eq_fir_l" in cdsp["filters"]
+    assert cdsp["devices"]["samplerate"] == 48000
+    assert cdsp["devices"]["resampler"]["type"] == "AsyncSinc"
+
+
 def test_hardware_mode_falls_back_to_software_on_missing_mixer(monkeypatch) -> None:
     from app.volume import controller as vol_mod
 

@@ -110,9 +110,62 @@ class SystemConfig(BaseModel):
     logging_enabled: bool = False
 
 
+class EQBand(BaseModel):
+    channel: Literal["both", "left", "right"] = "both"
+    type: Literal["Peaking", "LowShelf", "HighShelf", "Lowpass", "Highpass"] = "Peaking"
+    freq: float = Field(default=1000.0, ge=10.0, le=24000.0)
+    gain: float = Field(default=0.0, ge=-24.0, le=12.0)
+    q: float = Field(default=1.0, ge=0.1, le=25.0)
+    enabled: bool = True
+
+
+class EQPreset(BaseModel):
+    id: str
+    name: str
+    source_type: Literal["manual", "rew_filters", "rew_measurement_auto", "rephase_fir"] = "manual"
+    target_curve: Literal["harman", "flat"] = "harman"
+    bands: List[EQBand] = Field(default_factory=list)
+    left_delay_ms: float = Field(default=0.0, ge=0.0, le=100.0)
+    right_delay_ms: float = Field(default=0.0, ge=0.0, le=100.0)
+    left_impulse_path: Optional[str] = None
+    right_impulse_path: Optional[str] = None
+    impulse_sample_rate: Optional[int] = None
+    impulse_taps: Optional[int] = None
+    impulse_peak_gain_db: float = 0.0
+    measurement_freqs: List[float] = Field(default_factory=list)
+    measurement_spl: List[float] = Field(default_factory=list)
+
+
+class RoomEQConfig(BaseModel):
+    enabled: bool = False
+    active_preset_id: Optional[str] = None
+    presets: List[EQPreset] = Field(default_factory=list)
+
+    def get_active_preset(self) -> Optional[EQPreset]:
+        if not self.enabled or not self.active_preset_id:
+            return None
+        for p in self.presets:
+            if p.id == self.active_preset_id:
+                return p
+        return None
+
+    def has_active_processing(self) -> bool:
+        preset = self.get_active_preset()
+        if preset is None:
+            return False
+        has_bands = any(
+            b.enabled and (b.type in ("Lowpass", "Highpass") or abs(b.gain) > 1e-4)
+            for b in preset.bands
+        )
+        has_delay = preset.left_delay_ms > 0.0 or preset.right_delay_ms > 0.0
+        has_fir = bool(preset.left_impulse_path or preset.right_impulse_path)
+        return has_bands or has_delay or has_fir
+
+
 class HydraConfig(BaseModel):
     audio: AudioOutputConfig = Field(default_factory=AudioOutputConfig)
     volume: VolumeConfig = Field(default_factory=VolumeConfig)
+    eq: RoomEQConfig = Field(default_factory=RoomEQConfig)
     ir: IRConfig = Field(default_factory=IRConfig)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     renderers: RenderersConfig = Field(default_factory=RenderersConfig)

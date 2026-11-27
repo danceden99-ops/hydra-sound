@@ -15,7 +15,8 @@ import websockets
 import yaml
 
 from app.audio.alsa import select_best_pcm_format
-from app.config import AudioOutputConfig, VolumeConfig
+from app.audio.eq import compute_max_boost_db
+from app.config import AudioOutputConfig, RoomEQConfig, VolumeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -95,14 +96,24 @@ def build_camilladsp_config(
     capture_device: str = "hw:Loopback,1,0",
     capture_rate: int = 44100,
     use_alsa_cdsp: bool = False,
+    eq_cfg: Optional[RoomEQConfig] = None,
 ) -> dict:
     """Build a 64-bit float internal precision CamillaDSP YAML dictionary."""
+    preset = eq_cfg.get_active_preset() if (eq_cfg and eq_cfg.has_active_processing()) else None
+    has_fir = bool(preset and (preset.left_impulse_path or preset.right_impulse_path))
+    fir_rate = preset.impulse_sample_rate if (has_fir and preset and preset.impulse_sample_rate) else None
+
     target_format = (
         bit_depth_to_alsa_format(audio_cfg.resample_bit_depth, audio_cfg.device_id)
         if audio_cfg.resample_enabled
         else select_best_pcm_format(audio_cfg.device_id)
     )
-    target_rate = audio_cfg.resample_rate if audio_cfg.resample_enabled else capture_rate
+    if audio_cfg.resample_enabled:
+        target_rate: int | str = audio_cfg.resample_rate
+    elif fir_rate is not None:
+        target_rate = fir_rate
+    else:
+        target_rate = capture_rate
 
     playback_device = audio_cfg.device_id
     if (
@@ -115,18 +126,14 @@ def build_camilladsp_config(
             playback_device = f"hdmi:CARD={card_dev[0]},DEV={card_dev[1]}"
 
     if use_alsa_cdsp:
-        samplerate_val: int | str = (
-            audio_cfg.resample_rate if audio_cfg.resample_enabled else "$samplerate$"
-        )
-        chunksize = (
-            1024
-            if (audio_cfg.resample_enabled and audio_cfg.resample_rate <= 48000)
-            else (
-                4096
-                if (audio_cfg.resample_enabled and audio_cfg.resample_rate > 96000)
-                else 2048
-            )
-        )
+        if audio_cfg.resample_enabled:
+            samplerate_val: int | str = audio_cfg.resample_rate
+        elif fir_rate is not None:
+            samplerate_val = fir_rate
+        else:
+            samplerate_val = "$samplerate$"
+        rate_num = samplerate_val if isinstance(samplerate_val, int) else 96000
+        chunksize = 1024 if rate_num <= 48000 else (4096 if rate_num > 96000 else 2048)
         devices: dict = {
             "samplerate": samplerate_val,
             "chunksize": chunksize,
@@ -143,7 +150,7 @@ def build_camilladsp_config(
                 "format": target_format,
             },
         }
-        if audio_cfg.resample_enabled:
+        if audio_cfg.resample_enabled or fir_rate is not None:
             profile = RESAMPLER_PROFILES.get(
                 audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
             )
@@ -173,7 +180,7 @@ def build_camilladsp_config(
                 "format": target_format,
             },
         }
-        if audio_cfg.resample_enabled and capture_rate != target_rate:
+        if (audio_cfg.resample_enabled or fir_rate is not None) and capture_rate != target_rate:
             profile = RESAMPLER_PROFILES.get(
                 audio_cfg.resample_algorithm, RESAMPLER_PROFILES["SincVeryHigh"]
             )
@@ -195,7 +202,62 @@ def build_camilladsp_config(
             },
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["safety_mute"]})
-    elif volume_cfg.mode == "software":
+
+    if preset is not None:
+        max_boost = max(
+            compute_max_boost_db(preset.bands, "left", preset.impulse_peak_gain_db),
+            compute_max_boost_db(preset.bands, "right", preset.impulse_peak_gain_db),
+        )
+        if max_boost > 0.0:
+            filters["eq_headroom"] = {
+                "type": "Gain",
+                "parameters": {
+                    "gain": round(-(max_boost + 0.1), 2),
+                    "mute": False,
+                },
+            }
+            pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["eq_headroom"]})
+
+        for idx, band in enumerate(preset.bands):
+            if not band.enabled:
+                continue
+            if band.type not in ("Lowpass", "Highpass") and abs(band.gain) < 1e-4:
+                continue
+            fname = f"eq_band_{idx}"
+            bparams: dict = {"type": band.type, "freq": float(band.freq), "q": float(band.q)}
+            if band.type not in ("Lowpass", "Highpass"):
+                bparams["gain"] = float(band.gain)
+            filters[fname] = {"type": "Biquad", "parameters": bparams}
+            chans = [0, 1] if band.channel == "both" else ([0] if band.channel == "left" else [1])
+            pipeline.append({"type": "Filter", "channels": chans, "names": [fname]})
+
+        if preset.left_delay_ms > 0.0:
+            filters["eq_delay_l"] = {
+                "type": "Delay",
+                "parameters": {"delay": float(preset.left_delay_ms), "unit": "ms", "subsample": True},
+            }
+            pipeline.append({"type": "Filter", "channels": [0], "names": ["eq_delay_l"]})
+        if preset.right_delay_ms > 0.0:
+            filters["eq_delay_r"] = {
+                "type": "Delay",
+                "parameters": {"delay": float(preset.right_delay_ms), "unit": "ms", "subsample": True},
+            }
+            pipeline.append({"type": "Filter", "channels": [1], "names": ["eq_delay_r"]})
+
+        if preset.left_impulse_path:
+            filters["eq_fir_l"] = {
+                "type": "Conv",
+                "parameters": {"type": "Wav", "filename": preset.left_impulse_path, "channel": 0},
+            }
+            pipeline.append({"type": "Filter", "channels": [0], "names": ["eq_fir_l"]})
+        if preset.right_impulse_path:
+            filters["eq_fir_r"] = {
+                "type": "Conv",
+                "parameters": {"type": "Wav", "filename": preset.right_impulse_path, "channel": 0},
+            }
+            pipeline.append({"type": "Filter", "channels": [1], "names": ["eq_fir_r"]})
+
+    if volume_cfg.mode == "software":
         eff_max = get_effective_max_volume(volume_cfg)
         max_db = round(percent_to_db(eff_max, volume_cfg.curve), 2)
         filters["master_volume"] = {
@@ -208,7 +270,7 @@ def build_camilladsp_config(
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["master_volume"]})
 
-    if audio_cfg.resample_enabled:
+    if audio_cfg.resample_enabled or preset is not None:
         filters["dsp_limiter"] = {
             "type": "Limiter",
             "parameters": {
@@ -218,7 +280,7 @@ def build_camilladsp_config(
         }
         pipeline.append({"type": "Filter", "channels": [0, 1], "names": ["dsp_limiter"]})
 
-    if (audio_cfg.resample_enabled or volume_cfg.mode == "software") and (
+    if (audio_cfg.resample_enabled or volume_cfg.mode == "software" or preset is not None) and (
         target_format in ("S16_LE", "S24_3_LE", "S24_4_RJ_LE")
         or audio_cfg.dither_24bit_spdif
     ):
@@ -264,10 +326,15 @@ class CamillaDSPManager:
         )
 
     def render_cdsp_template(
-        self, audio_cfg: AudioOutputConfig, volume_cfg: VolumeConfig
+        self,
+        audio_cfg: AudioOutputConfig,
+        volume_cfg: VolumeConfig,
+        eq_cfg: Optional[RoomEQConfig] = None,
     ) -> str:
         """Render CamillaDSP YAML template with unquoted alsa_cdsp substitution tokens."""
-        data = build_camilladsp_config(audio_cfg, volume_cfg, use_alsa_cdsp=True)
+        data = build_camilladsp_config(
+            audio_cfg, volume_cfg, use_alsa_cdsp=True, eq_cfg=eq_cfg
+        )
         dumped = yaml.safe_dump(data, sort_keys=False)
         for tok in ("$samplerate$", "$channels$", "$format$"):
             dumped = dumped.replace(f"'{tok}'", tok).replace(f'"{tok}"', tok)
@@ -278,13 +345,15 @@ class CamillaDSPManager:
         audio_cfg: AudioOutputConfig,
         volume_cfg: VolumeConfig,
         asound_conf_path: Path = Path("/etc/asound.conf"),
+        eq_cfg: Optional[RoomEQConfig] = None,
     ) -> None:
         """Configure alsa_cdsp template, config_cmd script, and /etc/asound.conf."""
         self.stop()
         self._cdsp_mode = True
         self.template_path.parent.mkdir(parents=True, exist_ok=True)
         self.template_path.write_text(
-            self.render_cdsp_template(audio_cfg, volume_cfg), encoding="utf-8"
+            self.render_cdsp_template(audio_cfg, volume_cfg, eq_cfg=eq_cfg),
+            encoding="utf-8",
         )
         if volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed:
             self.write_statefile(-80.0, True)
@@ -332,9 +401,12 @@ class CamillaDSPManager:
         audio_cfg: AudioOutputConfig,
         volume_cfg: VolumeConfig,
         capture_rate: int = 44100,
+        eq_cfg: Optional[RoomEQConfig] = None,
     ) -> Path:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        data = build_camilladsp_config(audio_cfg, volume_cfg, capture_rate=capture_rate)
+        data = build_camilladsp_config(
+            audio_cfg, volume_cfg, capture_rate=capture_rate, eq_cfg=eq_cfg
+        )
         self.config_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
         return self.config_path
 
@@ -343,10 +415,13 @@ class CamillaDSPManager:
         audio_cfg: AudioOutputConfig,
         volume_cfg: VolumeConfig,
         capture_rate: int = 44100,
+        eq_cfg: Optional[RoomEQConfig] = None,
     ) -> None:
         self._cdsp_mode = False
         new_yaml = yaml.safe_dump(
-            build_camilladsp_config(audio_cfg, volume_cfg, capture_rate=capture_rate),
+            build_camilladsp_config(
+                audio_cfg, volume_cfg, capture_rate=capture_rate, eq_cfg=eq_cfg
+            ),
             sort_keys=False,
         )
         if (

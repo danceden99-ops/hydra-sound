@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let currentMuted = false;
 let currentVolumeMode = "disabled";
+let eqState = { enabled: false, active_preset_id: null, presets: [] };
 
 function showToast(msg) {
   const t = $("toast");
@@ -268,6 +269,7 @@ async function loadInitialConfig() {
   $("net-gw").value = cfg.network.gateway || latestNetStatus.gateway || "";
   $("net-dns").value = cfg.network.dns || latestNetStatus.dns || "";
   $("net-host").textContent = `${cfg.network.hostname}.local (${latestNetStatus.ip_address || "—"})`;
+  if (cfg.eq) loadEQState(cfg.eq);
   $("wifi-country").value = cfg.network.wifi_country || "US";
   $("wifi-ssid").value = cfg.network.wifi_ssid || "";
   $("wifi-pass").value = cfg.network.wifi_password || "";
@@ -651,6 +653,343 @@ $("btn-clear-logs").addEventListener("click", async () => {
   await api("/api/system/logs/clear", "POST");
   await loadSystemLogs();
   showToast("System logs cleared");
+});
+
+// ======================== Room & Speaker EQ ========================
+function getEditingPreset() {
+  const pid = $("eq-preset-select")?.value;
+  return (eqState.presets || []).find((p) => p.id === pid) || null;
+}
+
+function loadEQState(eq) {
+  eqState = eq || { enabled: false, active_preset_id: null, presets: [] };
+  if ($("eq-enabled")) $("eq-enabled").checked = Boolean(eqState.enabled);
+
+  const quick = $("eq-quick-select");
+  const sel = $("eq-preset-select");
+  if (quick) {
+    quick.innerHTML = '<option value="off">Off (Bit-Perfect)</option>';
+    (eqState.presets || []).forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      quick.appendChild(opt);
+    });
+    quick.value = eqState.enabled && eqState.active_preset_id ? eqState.active_preset_id : "off";
+  }
+  if ($("eq-quick-note")) {
+    $("eq-quick-note").textContent = eqState.enabled && eqState.active_preset_id ? "Active" : "Bypassed";
+  }
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = "";
+    (eqState.presets || []).forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    if (eqState.active_preset_id && (eqState.presets || []).some((p) => p.id === eqState.active_preset_id)) {
+      sel.value = eqState.active_preset_id;
+    } else if (prev && (eqState.presets || []).some((p) => p.id === prev)) {
+      sel.value = prev;
+    }
+  }
+  renderSelectedEQPreset();
+}
+
+function renderSelectedEQPreset() {
+  const preset = getEditingPreset();
+  const tbody = $("eq-bands-body");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!preset) {
+    $("eq-preset-meta").textContent = "No presets yet — click New or import a REW / rePhase file below.";
+    $("eq-delay-left").value = 0;
+    $("eq-delay-right").value = 0;
+    drawEQChart([]);
+    return;
+  }
+  $("eq-target-curve").value = preset.target_curve || "harman";
+  $("eq-delay-left").value = preset.left_delay_ms || 0;
+  $("eq-delay-right").value = preset.right_delay_ms || 0;
+
+  const firInfo = (preset.left_impulse_path || preset.right_impulse_path)
+    ? ` · FIR: ${preset.impulse_taps || "?"} taps @ ${preset.impulse_sample_rate || "?"} Hz`
+    : "";
+  $("eq-preset-meta").textContent =
+    `Source: ${preset.source_type}${firInfo} · Bands: ${(preset.bands || []).length}`;
+
+  (preset.bands || []).forEach((b, idx) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input type="checkbox" class="eq-b-on" ${b.enabled ? "checked" : ""} /></td>
+      <td><select class="eq-ch">
+        <option value="both" ${b.channel === "both" ? "selected" : ""}>Both</option>
+        <option value="left" ${b.channel === "left" ? "selected" : ""}>Left</option>
+        <option value="right" ${b.channel === "right" ? "selected" : ""}>Right</option>
+      </select></td>
+      <td><select class="eq-type">
+        <option value="Peaking" ${b.type === "Peaking" ? "selected" : ""}>Peaking</option>
+        <option value="LowShelf" ${b.type === "LowShelf" ? "selected" : ""}>LowShelf</option>
+        <option value="HighShelf" ${b.type === "HighShelf" ? "selected" : ""}>HighShelf</option>
+        <option value="Lowpass" ${b.type === "Lowpass" ? "selected" : ""}>Lowpass</option>
+        <option value="Highpass" ${b.type === "Highpass" ? "selected" : ""}>Highpass</option>
+      </select></td>
+      <td><input type="number" class="eq-freq" min="10" max="24000" step="0.5" value="${b.freq}" /></td>
+      <td><input type="number" class="eq-gain" min="-24" max="12" step="0.1" value="${b.gain}" /></td>
+      <td><input type="number" class="eq-q" min="0.1" max="25" step="0.05" value="${b.q}" /></td>
+      <td><button class="btn btn-sm btn-outline eq-del" data-idx="${idx}">×</button></td>
+    `;
+    tr.querySelectorAll("input, select").forEach((inp) => {
+      inp.addEventListener("change", () => {
+        preset.bands = collectBandsFromTable();
+        drawEQChart(preset);
+      });
+    });
+    tr.querySelector(".eq-del").addEventListener("click", () => {
+      preset.bands.splice(idx, 1);
+      renderSelectedEQPreset();
+    });
+    tbody.appendChild(tr);
+  });
+  drawEQChart(preset);
+}
+
+function collectBandsFromTable() {
+  const rows = document.querySelectorAll("#eq-bands-body tr");
+  return Array.from(rows).map((tr) => ({
+    enabled: tr.querySelector(".eq-b-on").checked,
+    channel: tr.querySelector(".eq-ch").value,
+    type: tr.querySelector(".eq-type").value,
+    freq: Number(tr.querySelector(".eq-freq").value) || 1000,
+    gain: Number(tr.querySelector(".eq-gain").value) || 0,
+    q: Number(tr.querySelector(".eq-q").value) || 1.0,
+  }));
+}
+
+async function drawEQChart(preset) {
+  const canvas = $("eq-chart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const bands = Array.isArray(preset) ? preset : (preset?.bands || []);
+  const targetCurve = (!Array.isArray(preset) && preset?.target_curve) || "harman";
+  const peakImp = (!Array.isArray(preset) && preset?.impulse_peak_gain_db) || 0;
+  const data = await api("/api/eq/preview", "POST", {
+    bands,
+    target_curve: targetCurve,
+    impulse_peak_gain_db: peakImp,
+  });
+
+  const padL = 42, padR = 16, padT = 16, padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const minDb = -18, maxDb = 18;
+  const xOf = (f) => padL + ((Math.log10(Math.max(20, Math.min(20000, f))) - Math.log10(20)) / 3.0) * plotW;
+  const yOf = (db) => padT + ((maxDb - Math.max(minDb, Math.min(maxDb, db))) / (maxDb - minDb)) * plotH;
+
+  // Grid
+  ctx.strokeStyle = "#30363d";
+  ctx.fillStyle = "#8b949e";
+  ctx.font = "11px sans-serif";
+  ctx.lineWidth = 1;
+  [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].forEach((f) => {
+    const x = xOf(f);
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, H - padB);
+    ctx.stroke();
+    ctx.fillText(f >= 1000 ? `${f / 1000}k` : `${f}`, x - 8, H - 8);
+  });
+  [-12, -6, 0, 6, 12].forEach((db) => {
+    const y = yOf(db);
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(W - padR, y);
+    ctx.stroke();
+    ctx.fillText(`${db > 0 ? "+" : ""}${db}`, 6, y + 4);
+  });
+
+  const plotLine = (freqs, vals, color, width = 2, dash = []) => {
+    if (!freqs || !vals || !freqs.length) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    freqs.forEach((f, i) => {
+      const x = xOf(f);
+      const y = yOf(vals[i]);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  plotLine(data.freqs, data.target, "#8b949e", 1.5, [4, 4]);
+  if (!Array.isArray(preset) && preset?.measurement_freqs?.length) {
+    plotLine(preset.measurement_freqs, preset.measurement_spl, "#f59e0b", 1.5);
+    const pred = data.freqs.map((f, i) => {
+      const m = preset.measurement_spl[Math.min(i, preset.measurement_spl.length - 1)] || 0;
+      return m + (data.biquad_left[i] || 0);
+    });
+    plotLine(data.freqs, pred, "#3fb950", 2);
+  }
+  plotLine(data.freqs, data.biquad_left, "#38bdf8", 2);
+  if (data.biquad_right.some((v, i) => Math.abs(v - data.biquad_left[i]) > 0.05)) {
+    plotLine(data.freqs, data.biquad_right, "#f472b6", 2, [5, 3]);
+  }
+  if ($("eq-chart-legend")) {
+    $("eq-chart-legend").textContent = `Headroom Pre-Gain: -${data.headroom_db > 0 ? (data.headroom_db + 0.1).toFixed(1) : "0.0"} dB`;
+  }
+}
+
+$("eq-quick-select")?.addEventListener("change", async () => {
+  const val = $("eq-quick-select").value;
+  const enabled = val !== "off";
+  const next = {
+    ...eqState,
+    enabled,
+    active_preset_id: enabled ? val : eqState.active_preset_id,
+  };
+  const res = await api("/api/eq", "PUT", next);
+  if (res.ok) {
+    loadEQState(res.eq);
+    showToast(enabled ? "Room EQ enabled" : "Room EQ bypassed (Bit-Perfect)");
+  }
+});
+
+$("eq-enabled")?.addEventListener("change", async () => {
+  const enabled = $("eq-enabled").checked;
+  const next = { ...eqState, enabled };
+  const res = await api("/api/eq", "PUT", next);
+  if (res.ok) {
+    loadEQState(res.eq);
+    showToast(enabled ? "Room EQ enabled" : "Room EQ disabled");
+  }
+});
+
+$("eq-preset-select")?.addEventListener("change", renderSelectedEQPreset);
+
+$("btn-eq-add-band")?.addEventListener("click", () => {
+  const preset = getEditingPreset();
+  if (!preset) { showToast("Create or import a preset first"); return; }
+  preset.bands = collectBandsFromTable();
+  if (preset.bands.length >= 24) { showToast("Maximum 24 bands per preset"); return; }
+  preset.bands.push({ channel: "both", type: "Peaking", freq: 1000, gain: 0, q: 1.4, enabled: true });
+  renderSelectedEQPreset();
+});
+
+$("btn-eq-new")?.addEventListener("click", async () => {
+  const name = prompt("New EQ Preset Name:", "Custom Room EQ");
+  if (!name) return;
+  const res = await api("/api/eq/presets", "POST", {
+    id: "",
+    name: name.trim(),
+    source_type: "manual",
+    target_curve: "harman",
+    bands: [{ channel: "both", type: "Peaking", freq: 80, gain: -3.0, q: 2.0, enabled: true }],
+  });
+  if (res.ok) { loadEQState(res.eq); showToast(`Created preset "${name.trim()}"`); }
+});
+
+$("btn-eq-rename")?.addEventListener("click", async () => {
+  const preset = getEditingPreset();
+  if (!preset) return;
+  const name = prompt("Rename EQ Preset:", preset.name);
+  if (!name) return;
+  preset.name = name.trim();
+  const res = await api("/api/eq/presets", "POST", preset);
+  if (res.ok) { loadEQState(res.eq); showToast("Preset renamed"); }
+});
+
+$("btn-eq-delete")?.addEventListener("click", async () => {
+  const preset = getEditingPreset();
+  if (!preset || !confirm(`Delete preset "${preset.name}"?`)) return;
+  const res = await api(`/api/eq/presets/${encodeURIComponent(preset.id)}`, "DELETE");
+  if (res.ok) { loadEQState(res.eq); showToast("Preset deleted"); }
+});
+
+$("btn-eq-save-preset")?.addEventListener("click", async () => {
+  const preset = getEditingPreset();
+  if (!preset) return;
+  preset.target_curve = $("eq-target-curve").value;
+  preset.left_delay_ms = Number($("eq-delay-left").value) || 0;
+  preset.right_delay_ms = Number($("eq-delay-right").value) || 0;
+  preset.bands = collectBandsFromTable();
+  const res = await api("/api/eq/presets", "POST", preset);
+  if (res.ok) { loadEQState(res.eq); showToast("EQ preset saved & applied"); }
+});
+
+function readFileAsText(input) {
+  return new Promise((resolve, reject) => {
+    const f = input?.files?.[0];
+    if (!f) { resolve(null); return; }
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ""));
+    r.onerror = reject;
+    r.readAsText(f);
+  });
+}
+
+function readFileAsBase64(input) {
+  return new Promise((resolve, reject) => {
+    const f = input?.files?.[0];
+    if (!f) { resolve(null); return; }
+    const r = new FileReader();
+    r.onload = () => {
+      const res = String(r.result || "");
+      resolve({ name: f.name, b64: res.includes(",") ? res.split(",", 2)[1] : res });
+    };
+    r.onerror = reject;
+    r.readAsDataURL(f);
+  });
+}
+
+$("btn-eq-import-filters")?.addEventListener("click", async () => {
+  const fileText = await readFileAsText($("eq-imp-flt-file"));
+  const content = fileText || $("eq-imp-flt-text").value;
+  if (!content.trim()) { showToast("Select a REW filter file or paste filter text"); return; }
+  const res = await api("/api/eq/import/filters", "POST", {
+    preset_name: $("eq-imp-flt-name").value.trim() || "REW Filters",
+    channel: $("eq-imp-flt-ch").value,
+    content,
+  });
+  if (res.ok) { loadEQState(res.eq); showToast(`Imported ${res.imported_count} filter(s)`); }
+  else showToast(res.detail || "Filter import failed");
+});
+
+$("btn-eq-import-meas")?.addEventListener("click", async () => {
+  const fileText = await readFileAsText($("eq-imp-meas-file"));
+  const content = fileText || $("eq-imp-meas-text").value;
+  if (!content.trim()) { showToast("Select a REW measurement (.txt/.frd) or paste data"); return; }
+  const res = await api("/api/eq/import/measurement", "POST", {
+    preset_name: $("eq-imp-meas-name").value.trim() || "REW Auto-EQ",
+    channel: $("eq-imp-meas-ch").value,
+    target_curve: $("eq-imp-meas-target").value,
+    content,
+  });
+  if (res.ok) { loadEQState(res.eq); showToast(`Generated ${res.imported_count} Auto-EQ filter(s)`); }
+  else showToast(res.detail || "Measurement import failed");
+});
+
+$("btn-eq-import-fir")?.addEventListener("click", async () => {
+  const f = await readFileAsBase64($("eq-imp-fir-file"));
+  if (!f) { showToast("Select a rePhase .wav, .txt, or .bin file"); return; }
+  const res = await api("/api/eq/import/impulse", "POST", {
+    preset_name: $("eq-imp-fir-name").value.trim() || "rePhase FIR",
+    side: $("eq-imp-fir-side").value,
+    filename: f.name,
+    content_b64: f.b64,
+    sample_rate: Number($("eq-imp-fir-rate").value) || 44100,
+  });
+  if (res.ok) { loadEQState(res.eq); showToast("Imported rePhase FIR impulse"); }
+  else showToast(res.detail || "FIR import failed");
 });
 
 loadInitialConfig().then(connectWebSocket);

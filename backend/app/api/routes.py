@@ -18,13 +18,26 @@ from app.audio.alsa import (
     list_audio_devices,
     select_best_pcm_format,
 )
+from app.audio.eq import (
+    auto_eq_from_measurement,
+    compute_max_boost_db,
+    evaluate_bands_db,
+    import_rephase_impulse,
+    parse_rew_camilladsp_yaml,
+    parse_rew_filter_text,
+    parse_rew_measurement,
+    target_curve_db,
+)
 from app.audio.pipeline import has_alsa_cdsp
 from app.config import (
     AudioOutputConfig,
+    EQBand,
+    EQPreset,
     HydraConfig,
     IRConfig,
     NetworkConfig,
     RenderersConfig,
+    RoomEQConfig,
     SystemConfig,
     VolumeConfig,
 )
@@ -86,7 +99,8 @@ async def get_status(request: Request) -> dict:
         "audio": cfg.audio.model_dump(),
         "system": get_system_metrics(),
         "network": state.network_manager.get_status(cfg.network),
-        "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume),
+        "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq),
+        "eq": cfg.eq.model_dump(),
         "usb_safety_muted": state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume),
         "hardware_volume_error": state.volume_controller.hardware_error,
         "test_tone_active": _is_test_tone_running(state),
@@ -162,7 +176,7 @@ async def toggle_test_tone(request: Request) -> dict:
         )
         state.config_store.save(cfg)
 
-    target = state.pipeline.get_renderer_alsa_device(cfg.audio, cfg.volume)
+    target = state.pipeline.get_renderer_alsa_device(cfg.audio, cfg.volume, cfg.eq)
     is_hdmi = "hdmi" in cfg.audio.device_name.lower()
     if target not in ("camilladsp",) and "loopback" not in target.lower():
         target = format_named_alsa_device(target, is_hdmi=is_hdmi)
@@ -608,3 +622,285 @@ async def trigger_module_update(module_id: str, request: Request) -> dict:
     if adapter.is_enabled(cfg):
         adapter.start(cfg, state.orchestrator._current_alsa_device)
     return res
+
+
+class EQFilterImportRequest(BaseModel):
+    preset_id: Optional[str] = None
+    preset_name: str = "REW EQ"
+    channel: str = "both"  # both | left | right
+    content: str
+    replace_channel: bool = True
+
+
+class EQMeasurementImportRequest(BaseModel):
+    preset_id: Optional[str] = None
+    preset_name: str = "REW Auto-EQ"
+    channel: str = "both"
+    target_curve: str = "harman"  # harman | flat
+    content: str
+
+
+class EQImpulseImportRequest(BaseModel):
+    preset_id: Optional[str] = None
+    preset_name: str = "rePhase FIR"
+    side: str = "stereo"  # stereo | left | right
+    filename: str
+    content_b64: str
+    sample_rate: int = 44100
+
+
+class EQPreviewRequest(BaseModel):
+    bands: list[EQBand] = []
+    target_curve: str = "harman"
+    impulse_peak_gain_db: float = 0.0
+
+
+def _slugify_preset_id(name: str) -> str:
+    import re
+    import uuid
+
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return f"{slug or 'preset'}-{uuid.uuid4().hex[:6]}"
+
+
+async def _apply_eq_change_locked(state, cfg: HydraConfig, was_dsp: bool) -> None:
+    state.config_store.save(cfg)
+    now_dsp = state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+    if was_dsp != now_dsp or (now_dsp and has_alsa_cdsp()):
+        state.orchestrator.start_enabled_renderers(cfg)
+    elif now_dsp:
+        state.orchestrator.pipeline.apply(
+            cfg.audio,
+            cfg.volume,
+            capture_rate=state.orchestrator._active_capture_rate,
+            eq_cfg=cfg.eq,
+        )
+    if cfg.volume.mode != "hardware":
+        await state.volume_controller._apply_locked(cfg.audio, cfg.volume)
+
+
+@router.get("/eq")
+async def get_eq_config(request: Request) -> dict:
+    cfg: HydraConfig = request.app.state.config_store.get()
+    return cfg.eq.model_dump()
+
+
+@router.put("/eq")
+async def update_eq_config(payload: RoomEQConfig, request: Request) -> dict:
+    state = request.app.state
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        was_dsp = state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+        cfg.eq = payload
+        await _apply_eq_change_locked(state, cfg, was_dsp)
+    return {
+        "ok": True,
+        "eq": cfg.eq.model_dump(),
+        "dsp_active": state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq),
+    }
+
+
+@router.post("/eq/presets")
+async def save_eq_preset(payload: EQPreset, request: Request) -> dict:
+    state = request.app.state
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        was_dsp = state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+        if not payload.id:
+            payload.id = _slugify_preset_id(payload.name)
+        idx = next((i for i, p in enumerate(cfg.eq.presets) if p.id == payload.id), None)
+        if idx is not None:
+            cfg.eq.presets[idx] = payload
+        else:
+            cfg.eq.presets.append(payload)
+        cfg.eq.active_preset_id = payload.id
+        await _apply_eq_change_locked(state, cfg, was_dsp)
+    return {"ok": True, "preset": payload.model_dump(), "eq": cfg.eq.model_dump()}
+
+
+@router.delete("/eq/presets/{preset_id}")
+async def delete_eq_preset(preset_id: str, request: Request) -> dict:
+    from pathlib import Path
+
+    state = request.app.state
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        was_dsp = state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+        target = next((p for p in cfg.eq.presets if p.id == preset_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        for imp in (target.left_impulse_path, target.right_impulse_path):
+            if imp:
+                try:
+                    Path(imp).unlink(missing_ok=True)
+                except Exception:
+                    pass
+        cfg.eq.presets = [p for p in cfg.eq.presets if p.id != preset_id]
+        if cfg.eq.active_preset_id == preset_id:
+            cfg.eq.active_preset_id = cfg.eq.presets[0].id if cfg.eq.presets else None
+            if not cfg.eq.active_preset_id:
+                cfg.eq.enabled = False
+        await _apply_eq_change_locked(state, cfg, was_dsp)
+    return {"ok": True, "eq": cfg.eq.model_dump()}
+
+
+@router.post("/eq/import/filters")
+async def import_eq_filters(payload: EQFilterImportRequest, request: Request) -> dict:
+    channel = payload.channel if payload.channel in ("both", "left", "right") else "both"
+    bands = parse_rew_filter_text(payload.content, channel=channel)
+    if not bands:
+        try:
+            bands = parse_rew_camilladsp_yaml(payload.content, channel=channel)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid YAML filter file: {exc}") from exc
+    if not bands:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid REW Filter text or CamillaDSP Biquad YAML filters found.",
+        )
+
+    state = request.app.state
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        was_dsp = state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+        preset = next((p for p in cfg.eq.presets if p.id == payload.preset_id), None) if payload.preset_id else None
+        if preset is None:
+            preset = EQPreset(
+                id=_slugify_preset_id(payload.preset_name),
+                name=payload.preset_name.strip() or "REW EQ",
+                source_type="rew_filters",
+                bands=bands[:24],
+            )
+            cfg.eq.presets.append(preset)
+        else:
+            preset.source_type = "rew_filters"
+            if payload.replace_channel:
+                kept = [b for b in preset.bands if b.channel != channel]
+                preset.bands = (kept + bands)[:24]
+            else:
+                preset.bands = (preset.bands + bands)[:24]
+        cfg.eq.active_preset_id = preset.id
+        await _apply_eq_change_locked(state, cfg, was_dsp)
+    return {"ok": True, "imported_count": len(bands), "preset": preset.model_dump(), "eq": cfg.eq.model_dump()}
+
+
+@router.post("/eq/import/measurement")
+async def import_eq_measurement(payload: EQMeasurementImportRequest, request: Request) -> dict:
+    channel = payload.channel if payload.channel in ("both", "left", "right") else "both"
+    target_curve = "flat" if payload.target_curve == "flat" else "harman"
+    try:
+        freqs, spl = parse_rew_measurement(payload.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    bands, prev_f, prev_s = auto_eq_from_measurement(
+        freqs, spl, target_curve=target_curve, channel=channel, max_bands=10
+    )
+    state = request.app.state
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        was_dsp = state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+        preset = next((p for p in cfg.eq.presets if p.id == payload.preset_id), None) if payload.preset_id else None
+        if preset is None:
+            preset = EQPreset(
+                id=_slugify_preset_id(payload.preset_name),
+                name=payload.preset_name.strip() or "REW Auto-EQ",
+                source_type="rew_measurement_auto",
+                target_curve=target_curve,
+                bands=bands,
+                measurement_freqs=prev_f,
+                measurement_spl=prev_s,
+            )
+            cfg.eq.presets.append(preset)
+        else:
+            preset.source_type = "rew_measurement_auto"
+            preset.target_curve = target_curve
+            kept = [b for b in preset.bands if b.channel != channel]
+            preset.bands = (kept + bands)[:24]
+            preset.measurement_freqs = prev_f
+            preset.measurement_spl = prev_s
+        cfg.eq.active_preset_id = preset.id
+        await _apply_eq_change_locked(state, cfg, was_dsp)
+    return {"ok": True, "imported_count": len(bands), "preset": preset.model_dump(), "eq": cfg.eq.model_dump()}
+
+
+@router.post("/eq/import/impulse")
+async def import_eq_impulse(payload: EQImpulseImportRequest, request: Request) -> dict:
+    import base64
+
+    try:
+        raw = base64.b64decode(payload.content_b64)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid base64 impulse payload") from exc
+
+    state = request.app.state
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        was_dsp = state.pipeline.requires_dsp(cfg.audio, cfg.volume, cfg.eq)
+        preset = next((p for p in cfg.eq.presets if p.id == payload.preset_id), None) if payload.preset_id else None
+        if preset is None:
+            preset = EQPreset(
+                id=_slugify_preset_id(payload.preset_name),
+                name=payload.preset_name.strip() or "rePhase FIR",
+                source_type="rephase_fir",
+            )
+            cfg.eq.presets.append(preset)
+        else:
+            preset.source_type = "rephase_fir"
+
+        try:
+            if payload.side == "stereo":
+                lp, sr, taps, peak_l = import_rephase_impulse(
+                    raw, payload.filename, preset.id, "left", sample_rate=payload.sample_rate, channel_idx=0
+                )
+                rp, _, _, peak_r = import_rephase_impulse(
+                    raw, payload.filename, preset.id, "right", sample_rate=payload.sample_rate, channel_idx=1
+                )
+                preset.left_impulse_path = str(lp)
+                preset.right_impulse_path = str(rp)
+                preset.impulse_sample_rate = sr
+                preset.impulse_taps = taps
+                preset.impulse_peak_gain_db = max(peak_l, peak_r)
+            elif payload.side == "left":
+                lp, sr, taps, peak_l = import_rephase_impulse(
+                    raw, payload.filename, preset.id, "left", sample_rate=payload.sample_rate, channel_idx=0
+                )
+                preset.left_impulse_path = str(lp)
+                preset.impulse_sample_rate = sr
+                preset.impulse_taps = taps
+                preset.impulse_peak_gain_db = max(preset.impulse_peak_gain_db, peak_l)
+            else:
+                rp, sr, taps, peak_r = import_rephase_impulse(
+                    raw, payload.filename, preset.id, "right", sample_rate=payload.sample_rate, channel_idx=0
+                )
+                preset.right_impulse_path = str(rp)
+                preset.impulse_sample_rate = sr
+                preset.impulse_taps = taps
+                preset.impulse_peak_gain_db = max(preset.impulse_peak_gain_db, peak_r)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        cfg.eq.active_preset_id = preset.id
+        await _apply_eq_change_locked(state, cfg, was_dsp)
+    return {"ok": True, "preset": preset.model_dump(), "eq": cfg.eq.model_dump()}
+
+
+@router.post("/eq/preview")
+async def preview_eq_response(payload: EQPreviewRequest) -> dict:
+    import numpy as np
+
+    grid = np.geomspace(20.0, 20000.0, 160)
+    left = evaluate_bands_db(payload.bands, "left", grid)
+    right = evaluate_bands_db(payload.bands, "right", grid)
+    tgt = target_curve_db(grid, payload.target_curve)
+    headroom = max(
+        compute_max_boost_db(payload.bands, "left", payload.impulse_peak_gain_db),
+        compute_max_boost_db(payload.bands, "right", payload.impulse_peak_gain_db),
+    )
+    return {
+        "freqs": [round(float(x), 2) for x in grid],
+        "biquad_left": [round(float(x), 2) for x in left],
+        "biquad_right": [round(float(x), 2) for x in right],
+        "target": [round(float(x), 2) for x in tgt],
+        "headroom_db": headroom,
+    }
