@@ -385,10 +385,14 @@ $("vol-curve").addEventListener("change", () => {
     if (Number($("vol-power-on").value) > 25) {
       $("vol-power-on").value = 25;
     }
-    showToast("Linear curve selected — Max Volume lowered to 25% (-12 dB) for speaker safety");
+    alert(
+      "Volume scale changed: Linear mode is much louder at the same % than Logarithmic.\n\nMax Volume has been reset to a safe default (25%) — please verify it for your system."
+    );
   } else if (curve === "logarithmic" && Number($("vol-max").value) <= 25) {
     $("vol-max").value = 70;
-    showToast("Logarithmic curve selected — Max Volume reset to 70% (adjustable up to 100%)");
+    alert(
+      "Volume scale changed: Logarithmic mode scales gently across the slider compared to Linear.\n\nMax Volume has been reset to 70% — please verify it for your system."
+    );
   }
 });
 
