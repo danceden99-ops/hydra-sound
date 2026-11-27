@@ -14,7 +14,8 @@ from typing import Callable, Optional
 
 import yaml
 
-from app.audio.alsa import is_usb_audio_device, select_best_pcm_format
+from app.audio.alsa import select_best_pcm_format
+from app.audio.camilladsp import get_effective_max_volume
 from app.config import HydraConfig
 from app.renderers.base import RendererAdapter, RendererMetadata
 
@@ -140,7 +141,11 @@ class SpotifyRenderer(RendererAdapter):
             "audio_buffer_time": 500000,
             "audio_period_count": 4,
             "external_volume": True,
-            "initial_volume": 100,
+            "initial_volume": (
+                100
+                if cfg.volume.mode == "disabled"
+                else max(0, min(get_effective_max_volume(cfg.volume), cfg.volume.current_volume))
+            ),
             "volume_steps": 100,
             "zeroconf_enabled": sc.auth_mode == "zeroconf",
             "server": {
@@ -181,12 +186,12 @@ class SpotifyRenderer(RendererAdapter):
             "/opt/hydrasound/scripts/hooks/librespot_event.sh",
         ]
         best_fmt = select_best_pcm_format(alsa_device)
-        if "loopback" in alsa_device.lower() or best_fmt == "S32_LE" or is_usb_audio_device(
-            alsa_device, cfg.audio.device_name
-        ):
+        if alsa_device == "camilladsp" or "loopback" in alsa_device.lower() or best_fmt == "S32_LE":
             cmd.extend(["--format", "S32", "--dither", "none"])
-        elif best_fmt in ("S24_3_LE", "S24_4_RJ_LE"):
+        elif best_fmt == "S24_3_LE":
             cmd.extend(["--format", "S24_3", "--dither", "none"])
+        elif best_fmt == "S24_4_RJ_LE":
+            cmd.extend(["--format", "S24", "--dither", "none"])
 
         if sc.auth_mode == "credentials" and sc.username and sc.password:
             cmd.extend(["--username", sc.username, "--password", sc.password])

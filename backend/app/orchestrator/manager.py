@@ -145,11 +145,16 @@ class StreamOrchestrator:
 
         if event in ("play", "playing", "start", "metadata"):
             self._cancel_pause_timer()
-            if self.stream.active_source != source:
+            source_changed = self.stream.active_source != source
+            if source_changed:
                 self.stream = StreamInfo(active_source=source, state="playing")
             elif event != "metadata":
                 self.stream.state = "playing"
             self.stream.active_source = source
+            if source_changed and cfg.volume.mode != "disabled":
+                self.push_volume_to_active_client(
+                    cfg.volume.current_volume, cfg.volume.muted
+                )
             if artist:
                 self.stream.artist = artist
             if title:

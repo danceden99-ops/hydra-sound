@@ -51,7 +51,11 @@ RESAMPLER_PROFILES = {
 }
 
 
-def bit_depth_to_alsa_format(bit_depth: int) -> str:
+def bit_depth_to_alsa_format(bit_depth: int, device_id: str = "") -> str:
+    if bit_depth == 24 and device_id:
+        best = select_best_pcm_format(device_id)
+        if best in ("S24_3_LE", "S24_4_RJ_LE"):
+            return best
     return {
         16: "S16_LE",
         24: "S24_3_LE",
@@ -94,7 +98,7 @@ def build_camilladsp_config(
 ) -> dict:
     """Build a 64-bit float internal precision CamillaDSP YAML dictionary."""
     target_format = (
-        bit_depth_to_alsa_format(audio_cfg.resample_bit_depth)
+        bit_depth_to_alsa_format(audio_cfg.resample_bit_depth, audio_cfg.device_id)
         if audio_cfg.resample_enabled
         else select_best_pcm_format(audio_cfg.device_id)
     )
@@ -126,7 +130,7 @@ def build_camilladsp_config(
         devices: dict = {
             "samplerate": samplerate_val,
             "chunksize": chunksize,
-            "enable_rate_adjust": True,
+            "enable_rate_adjust": False,
             "capture": {
                 "type": "Stdin",
                 "channels": "$channels$",
@@ -282,8 +286,14 @@ class CamillaDSPManager:
         self.template_path.write_text(
             self.render_cdsp_template(audio_cfg, volume_cfg), encoding="utf-8"
         )
-        if not self.statefile_path.exists():
+        if volume_cfg.mode == "disabled" and not volume_cfg.usb_disabled_confirmed:
             self.write_statefile(-80.0, True)
+        else:
+            eff_max = get_effective_max_volume(volume_cfg)
+            safe_pct = max(0, min(eff_max, int(volume_cfg.current_volume)))
+            self.write_statefile(
+                percent_to_db(safe_pct, volume_cfg.curve), bool(volume_cfg.muted)
+            )
 
         cfg_cmd = Path(__file__).resolve().parents[3] / "scripts" / "camilla_cdsp_config.sh"
         try:

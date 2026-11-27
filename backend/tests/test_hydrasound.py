@@ -501,6 +501,29 @@ def test_qobuz_set_client_volume_normalized_scale(monkeypatch) -> None:
     assert captured == [{"volume": 0.25, "mute": True}]
 
 
+def test_partial_volume_config_preserves_live_volume_and_mute() -> None:
+    with TestClient(app) as client:
+        client.put("/api/volume", json={"volume": 12})
+        client.post("/api/volume/mute")
+        res = client.put("/api/config/volume", json={"mode": "software", "max_volume": 65})
+        assert res.status_code == 200
+        vol = res.json()["volume"]
+        assert vol["current_volume"] == 12
+        assert vol["muted"] is True
+
+
+def test_bit_depth_24_resolves_s24_4_rj_le_and_format_cache_clears(monkeypatch) -> None:
+    from app.audio import alsa as alsa_mod
+    from app.audio import camilladsp as cdsp_mod
+
+    monkeypatch.setattr(cdsp_mod, "select_best_pcm_format", lambda dev: "S24_4_RJ_LE")
+    assert cdsp_mod.bit_depth_to_alsa_format(24, "hw:1,0") == "S24_4_RJ_LE"
+
+    alsa_mod._FORMAT_CACHE["hw:1,0"] = (999999999.0, "S32_LE")
+    alsa_mod.invalidate_usb_cache()
+    assert "hw:1,0" not in alsa_mod._FORMAT_CACHE
+
+
 def test_hardware_mode_falls_back_to_software_on_missing_mixer(monkeypatch) -> None:
     from app.volume import controller as vol_mod
 

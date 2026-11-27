@@ -18,6 +18,7 @@ from app.audio.alsa import (
     list_audio_devices,
     select_best_pcm_format,
 )
+from app.audio.pipeline import has_alsa_cdsp
 from app.config import (
     AudioOutputConfig,
     HydraConfig,
@@ -146,10 +147,19 @@ async def toggle_test_tone(request: Request) -> dict:
         _stop_test_tone(state)
         return {"ok": True, "playing": False, "volume": cfg.volume.model_dump()}
 
+    if state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume):
+        raise HTTPException(
+            status_code=409,
+            detail="Output is muted by USB speaker protection. Confirm 0 dB pass-through first.",
+        )
+    if cfg.volume.mode == "hardware" and state.volume_controller.hardware_error:
+        raise HTTPException(status_code=409, detail=state.volume_controller.hardware_error)
+
     if cfg.volume.mode != "disabled":
-        cfg.volume.muted = False
         safe_vol = min(cfg.volume.current_volume, 50)
-        await state.volume_controller.set_volume(safe_vol, cfg.audio, cfg.volume)
+        await state.volume_controller.set_volume(
+            safe_vol, cfg.audio, cfg.volume, unmute=True
+        )
         state.config_store.save(cfg)
 
     target = state.pipeline.get_renderer_alsa_device(cfg.audio, cfg.volume)
@@ -178,34 +188,35 @@ async def toggle_test_tone(request: Request) -> dict:
 @router.put("/config/audio")
 async def update_audio_config(payload: AudioOutputConfig, request: Request) -> dict:
     state = request.app.state
-    cfg: HydraConfig = state.config_store.get()
-    device_changed = (
-        cfg.audio.device_id != payload.device_id
-        or cfg.audio.device_name != payload.device_name
-    )
-    cfg.audio = payload
-    if payload.device_id.startswith("hw:"):
-        try:
-            card_idx = payload.device_id.split(":", 1)[1].split(",", 1)[0]
-            card_id, serial = get_usb_device_identity(card_idx)
-            if card_id and not cfg.audio.alsa_card_id:
-                cfg.audio.alsa_card_id = card_id
-            if serial and not cfg.audio.usb_serial:
-                cfg.audio.usb_serial = serial
-        except Exception:
-            pass
-    if device_changed:
-        invalidate_usb_cache()
-        cfg.volume.usb_disabled_confirmed = False
-        cfg.volume.current_volume = state.volume_controller.clamp_volume(
-            cfg.volume.power_on_volume, cfg.volume
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        device_changed = (
+            cfg.audio.device_id != payload.device_id
+            or cfg.audio.device_name != payload.device_name
         )
-    state.config_store.save(cfg)
-    if cfg.volume.mode == "hardware":
-        await state.volume_controller.apply(cfg.audio, cfg.volume)
-    state.orchestrator.start_enabled_renderers(cfg)
-    if cfg.volume.mode != "hardware":
-        await state.volume_controller.apply(cfg.audio, cfg.volume)
+        cfg.audio = payload
+        if payload.device_id.startswith("hw:"):
+            try:
+                card_idx = payload.device_id.split(":", 1)[1].split(",", 1)[0]
+                card_id, serial = get_usb_device_identity(card_idx)
+                if card_id and not cfg.audio.alsa_card_id:
+                    cfg.audio.alsa_card_id = card_id
+                if serial and not cfg.audio.usb_serial:
+                    cfg.audio.usb_serial = serial
+            except Exception:
+                pass
+        if device_changed:
+            invalidate_usb_cache()
+            cfg.volume.usb_disabled_confirmed = False
+            cfg.volume.current_volume = state.volume_controller.clamp_volume(
+                cfg.volume.power_on_volume, cfg.volume
+            )
+        state.config_store.save(cfg)
+        if cfg.volume.mode == "hardware":
+            await state.volume_controller._apply_locked(cfg.audio, cfg.volume)
+        state.orchestrator.start_enabled_renderers(cfg)
+        if cfg.volume.mode != "hardware":
+            await state.volume_controller._apply_locked(cfg.audio, cfg.volume)
     return {
         "ok": True,
         "audio": cfg.audio.model_dump(),
@@ -218,11 +229,17 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
     state = request.app.state
     async with state.volume_controller._lock:
         cfg: HydraConfig = state.config_store.get()
+        prev_vol = cfg.volume.current_volume
+        prev_muted = cfg.volume.muted
         mode_changed = cfg.volume.mode != payload.mode
         max_changed = cfg.volume.max_volume != payload.max_volume
         curve_changed = cfg.volume.curve != payload.curve
         if payload.mode != "disabled":
             payload.usb_disabled_confirmed = False
+        if "current_volume" not in payload.model_fields_set:
+            payload.current_volume = prev_vol
+        if "muted" not in payload.model_fields_set:
+            payload.muted = prev_muted
         cfg.volume = payload
         cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
             cfg.volume.power_on_volume, cfg.volume
@@ -232,28 +249,32 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         )
         state.config_store.save(cfg)
 
-    fallback_error: Optional[str] = None
-    if cfg.volume.mode == "hardware":
-        await state.volume_controller.apply(cfg.audio, cfg.volume)
-        if state.volume_controller.hardware_error:
-            fallback_error = state.volume_controller.hardware_error
-            logging.getLogger(__name__).warning(
-                "Hardware mixer unavailable (%s); falling back to Software (CamillaDSP) volume control.",
-                fallback_error,
+        fallback_error: Optional[str] = None
+        if cfg.volume.mode == "hardware":
+            await state.volume_controller._apply_locked(cfg.audio, cfg.volume)
+            if state.volume_controller.hardware_error:
+                fallback_error = state.volume_controller.hardware_error
+                logging.getLogger(__name__).warning(
+                    "Hardware mixer unavailable (%s); falling back to Software (CamillaDSP) volume control.",
+                    fallback_error,
+                )
+                cfg.volume.mode = "software"
+                state.config_store.save(cfg)
+                mode_changed = True
+        if (
+            mode_changed
+            or state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume)
+            or (cfg.volume.mode == "software" and has_alsa_cdsp() and (max_changed or curve_changed))
+        ):
+            state.orchestrator.start_enabled_renderers(cfg)
+        elif cfg.volume.mode == "software" and (max_changed or curve_changed):
+            state.orchestrator.pipeline.apply(
+                cfg.audio,
+                cfg.volume,
+                capture_rate=state.orchestrator._active_capture_rate,
             )
-            cfg.volume.mode = "software"
-            state.config_store.save(cfg)
-            mode_changed = True
-    if mode_changed or state.pipeline.requires_usb_safety_mute(cfg.audio, cfg.volume):
-        state.orchestrator.start_enabled_renderers(cfg)
-    elif cfg.volume.mode == "software" and (max_changed or curve_changed):
-        state.orchestrator.pipeline.apply(
-            cfg.audio,
-            cfg.volume,
-            capture_rate=state.orchestrator._active_capture_rate,
-        )
-    if cfg.volume.mode != "hardware":
-        await state.volume_controller.apply(cfg.audio, cfg.volume)
+        if cfg.volume.mode != "hardware":
+            await state.volume_controller._apply_locked(cfg.audio, cfg.volume)
     return {
         "ok": True,
         "volume": cfg.volume.model_dump(),
@@ -266,15 +287,16 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
 @router.post("/volume/confirm-usb-disabled")
 async def confirm_usb_disabled(request: Request) -> dict:
     state = request.app.state
-    cfg: HydraConfig = state.config_store.get()
-    cfg.volume.usb_disabled_confirmed = True
-    state.config_store.save(cfg)
-    logging.getLogger(__name__).info(
-        "USB DAC speaker protection confirmed by user; enabling 0 dB bit-perfect pass-through on %s.",
-        cfg.audio.device_id,
-    )
-    state.orchestrator.start_enabled_renderers(cfg)
-    await state.volume_controller.apply(cfg.audio, cfg.volume)
+    async with state.volume_controller._lock:
+        cfg: HydraConfig = state.config_store.get()
+        cfg.volume.usb_disabled_confirmed = True
+        state.config_store.save(cfg)
+        logging.getLogger(__name__).info(
+            "USB DAC speaker protection confirmed by user; enabling 0 dB bit-perfect pass-through on %s.",
+            cfg.audio.device_id,
+        )
+        state.orchestrator.start_enabled_renderers(cfg)
+        await state.volume_controller._apply_locked(cfg.audio, cfg.volume)
     return {
         "ok": True,
         "volume": cfg.volume.model_dump(),

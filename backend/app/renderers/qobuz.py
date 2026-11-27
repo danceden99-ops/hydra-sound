@@ -155,7 +155,7 @@ class QobuzRenderer(RendererAdapter):
             if (
                 self._on_client_volume is not None
                 and vol != self._last_reported_vol
-                and (time.monotonic() - self._last_pushed_at) > 0.15
+                and (time.monotonic() - self._last_pushed_at) > 0.5
             ):
                 self._last_reported_vol = vol
                 self._on_client_volume(vol)

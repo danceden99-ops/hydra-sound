@@ -28,3 +28,8 @@ sed \
   -e "s/\\\$samplerate\\\$/${RATE}/g" \
   -e "s/\\\$channels\\\$/${CHANNELS}/g" \
   "$TMPL" > "$OUT"
+
+# Bypass AsyncSinc resampler when capture rate already matches target samplerate
+if grep -qE "^  samplerate: ${RATE}$" "$OUT" && grep -qE "^  capture_samplerate: ${RATE}$" "$OUT"; then
+  sed -i -e '/^  resampler:/,/^    profile:/d' -e '/^  capture_samplerate:/d' "$OUT"
+fi

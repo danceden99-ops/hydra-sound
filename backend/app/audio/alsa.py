@@ -156,8 +156,9 @@ _USB_CACHE: Dict[str, Tuple[float, bool]] = {}
 
 
 def invalidate_usb_cache() -> None:
-    """Clear the cached USB device classification map (e.g. after hotplug)."""
+    """Clear the cached USB device classification and format maps (e.g. after hotplug)."""
     _USB_CACHE.clear()
+    _FORMAT_CACHE.clear()
 
 
 def get_usb_device_identity(card: str | int) -> Tuple[str, str]:

@@ -107,26 +107,34 @@ async def lifespan(app: FastAPI):
         orchestrator.stop_all()
 
     async def _handle_usb_reconnect(cur_cfg, new_device_id: str) -> None:
-        cur_cfg.audio.device_id = new_device_id
-        try:
-            card_idx = new_device_id.split(":", 1)[1].split(",", 1)[0]
-            card_id, serial = get_usb_device_identity(card_idx)
-            if card_id:
-                cur_cfg.audio.alsa_card_id = card_id
-            if serial:
-                cur_cfg.audio.usb_serial = serial
-        except Exception:
-            pass
-        cur_cfg.volume.usb_disabled_confirmed = False
-        cur_cfg.volume.current_volume = volume_controller.clamp_volume(
-            cur_cfg.volume.power_on_volume, cur_cfg.volume
-        )
-        config_store.save(cur_cfg)
-        if cur_cfg.volume.mode == "hardware":
-            await volume_controller.apply(cur_cfg.audio, cur_cfg.volume)
-        orchestrator.start_enabled_renderers(cur_cfg)
-        if cur_cfg.volume.mode != "hardware":
-            await volume_controller.apply(cur_cfg.audio, cur_cfg.volume)
+        async with volume_controller._lock:
+            cur_cfg.audio.device_id = new_device_id
+            try:
+                card_idx = new_device_id.split(":", 1)[1].split(",", 1)[0]
+                card_id, serial = get_usb_device_identity(card_idx)
+                if card_id:
+                    cur_cfg.audio.alsa_card_id = card_id
+                if serial:
+                    cur_cfg.audio.usb_serial = serial
+            except Exception:
+                pass
+            cur_cfg.volume.usb_disabled_confirmed = False
+            cur_cfg.volume.current_volume = volume_controller.clamp_volume(
+                cur_cfg.volume.power_on_volume, cur_cfg.volume
+            )
+            config_store.save(cur_cfg)
+            if cur_cfg.volume.mode == "hardware":
+                await volume_controller._apply_locked(cur_cfg.audio, cur_cfg.volume)
+                if volume_controller.hardware_error:
+                    logger.warning(
+                        "Hardware mixer unavailable on reconnect (%s); falling back to Software DSP.",
+                        volume_controller.hardware_error,
+                    )
+                    cur_cfg.volume.mode = "software"
+                    config_store.save(cur_cfg)
+            orchestrator.start_enabled_renderers(cur_cfg)
+            if cur_cfg.volume.mode != "hardware":
+                await volume_controller._apply_locked(cur_cfg.audio, cur_cfg.volume)
 
     hotplug_monitor.start(
         asyncio.get_running_loop(),

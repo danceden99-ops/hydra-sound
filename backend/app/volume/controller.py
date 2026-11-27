@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import subprocess
 from typing import Callable, Optional
 
@@ -51,10 +52,13 @@ class VolumeController:
         audio_cfg: AudioOutputConfig,
         vol_cfg: VolumeConfig,
         notify_client: bool = True,
+        unmute: bool = False,
     ) -> VolumeConfig:
         async with self._lock:
             if vol_cfg.mode == "disabled":
                 return vol_cfg
+            if unmute:
+                vol_cfg.muted = False
             vol_cfg.current_volume = self.clamp_volume(level, vol_cfg)
             await self._apply_locked(audio_cfg, vol_cfg, notify_client=notify_client)
             return vol_cfg
@@ -140,7 +144,8 @@ class VolumeController:
                 return False, False
             out = res.stdout or ""
             has_pvol = "pvolume" in out.lower() or "playback channels:" in out.lower()
-            has_db = "db" in out.lower()
+            db_vals = [float(x) for x in re.findall(r"\[(-?\d+(?:\.\d+)?)dB\]", out)]
+            has_db = bool(db_vals) and max(db_vals) <= 0.05
             return has_pvol, has_db
         except Exception:
             return False, False
