@@ -263,6 +263,9 @@ async def update_volume_config(payload: VolumeConfig, request: Request) -> dict:
         for field_name in payload.model_fields_set:
             if field_name in payload.model_fields:
                 setattr(cfg.volume, field_name, getattr(payload, field_name))
+        if curve_changed and cfg.volume.curve == "linear" and cfg.volume.max_volume > 25:
+            cfg.volume.max_volume = 25
+            max_changed = True
         cfg.volume.power_on_volume = state.volume_controller.clamp_volume(
             cfg.volume.power_on_volume, cfg.volume
         )

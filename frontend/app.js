@@ -376,6 +376,22 @@ $("btn-test-tone").addEventListener("click", async () => {
   }
 });
 
+$("vol-curve").addEventListener("change", () => {
+  const curve = $("vol-curve").value;
+  if (curve === "linear") {
+    if (Number($("vol-max").value) > 25) {
+      $("vol-max").value = 25;
+    }
+    if (Number($("vol-power-on").value) > 25) {
+      $("vol-power-on").value = 25;
+    }
+    showToast("Linear curve selected — Max Volume lowered to 25% (-12 dB) for speaker safety");
+  } else if (curve === "logarithmic" && Number($("vol-max").value) <= 25) {
+    $("vol-max").value = 70;
+    showToast("Logarithmic curve selected — Max Volume reset to 70% (adjustable up to 100%)");
+  }
+});
+
 $("save-volume").addEventListener("click", async () => {
   const mode = $("vol-mode").value;
   let confirmed = false;
@@ -391,6 +407,10 @@ $("save-volume").addEventListener("click", async () => {
     hardware_mixer_name: $("vol-hw-mixer").value || "PCM",
     usb_disabled_confirmed: confirmed,
   });
+  if (res.volume) {
+    $("vol-max").value = res.volume.max_volume;
+    $("vol-power-on").value = res.volume.power_on_volume;
+  }
   if (res.fallback_to_software) {
     $("vol-mode").value = res.volume?.mode || "software";
     currentVolumeMode = $("vol-mode").value;
